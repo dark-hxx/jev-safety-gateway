@@ -1,0 +1,29 @@
+# 构建产物
+/gateway
+/gateway.exe
+/out/
+
+# 本地数据 / 数据库
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# 环境变量
+.env
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store
+
+# 本地 Agent 工具（不纳入项目仓库）
+/.codegraph/
+/.claude/
+/.agents/
+/.codex/
+# >>> Comet managed project state >>>
+!/.comet/
+/.comet/*
+!/.comet/config.yaml
+# <<< Comet managed project state <<<

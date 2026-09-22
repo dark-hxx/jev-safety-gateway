@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JEV 安全网关控制台</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Auth gate -->
+  <div id="auth" class="auth hidden">
+    <div class="card auth-card">
+      <h1>JEV 安全网关</h1>
+      <p id="auth-sub" class="muted"></p>
+      <input id="pw" type="password" placeholder="管理员口令" autocomplete="current-password" />
+      <input id="pw2" type="password" placeholder="确认口令" autocomplete="new-password" class="hidden" />
+      <button id="auth-btn" class="primary">登录</button>
+      <p id="auth-err" class="err"></p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="hidden">
+    <header>
+      <div class="brand">JEV 安全网关 <span class="muted">控制台</span></div>
+      <div class="head-right">
+        <span id="master-state" class="pill"></span>
+        <button id="logout" class="ghost">退出</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="stats" id="stats"></section>
+
+      <div class="grid">
+        <section class="card">
+          <h2>网关配置</h2>
+          <form id="settings-form" class="form">
+            <label class="switch-row">
+              <span>启用过滤（关闭则全部放行）</span>
+              <input type="checkbox" id="s_enabled" />
+            </label>
+            <label>上游地址 (Upstream Base URL)
+              <input id="s_upstream" placeholder="http://newapi:3000" />
+            </label>
+            <label>JEV 接口地址 (Base URL)
+              <input id="s_jevbase" placeholder="https://api.typesafe.ai" />
+            </label>
+            <label>JEV 模型
+              <input id="s_model" placeholder="jev-latest" />
+            </label>
+            <label>安全判定指令 (instructions)
+              <textarea id="s_instruction" rows="3"></textarea>
+            </label>
+            <div class="row">
+              <label>安全阈值 (0-1)
+                <input id="s_threshold" type="number" min="0" max="1" step="0.01" />
+              </label>
+              <label>最大送检字符数
+                <input id="s_maxchars" type="number" min="100" step="100" />
+              </label>
+              <label>JEV 超时 (ms)
+                <input id="s_timeout" type="number" min="500" step="500" />
+              </label>
+            </div>
+            <label class="switch-row">
+              <span>低于阈值即拦截（指令为“是否安全”时勾选）</span>
+              <input type="checkbox" id="s_blockbelow" />
+            </label>
+            <label class="switch-row">
+              <span>JEV 故障时放行 (fail-open)</span>
+              <input type="checkbox" id="s_failopen" />
+            </label>
+            <label class="switch-row">
+              <span>同时审核上游响应（开启后响应不再流式）</span>
+              <input type="checkbox" id="s_checkresp" />
+            </label>
+            <label class="switch-row">
+              <span>同一 IP 频繁攻击时临时封禁</span>
+              <input type="checkbox" id="s_abuse" />
+            </label>
+            <div class="row">
+              <label>统计窗口 (秒)
+                <input id="s_abuse_win" type="number" min="1" step="1" />
+              </label>
+              <label>窗口内有害次数阈值
+                <input id="s_abuse_max" type="number" min="1" step="1" />
+              </label>
+              <label>封禁时长 (秒)
+                <input id="s_abuse_ban" type="number" min="1" step="1" />
+              </label>
+            </div>
+            <label>拦截提示语
+              <input id="s_blockmsg" />
+            </label>
+            <button class="primary" type="submit">保存配置</button>
+            <span id="settings-msg" class="ok"></span>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>JEV 调用密钥（轮询使用）</h2>
+          <div class="form add-key">
+            <input id="k_label" placeholder="标签（可选）" />
+            <input id="k_value" placeholder="apikey_..." />
+            <button id="k_add" class="primary">添加</button>
+          </div>
+          <span id="key-msg" class="err"></span>
+          <div class="table-wrap">
+            <table id="keys-table" class="table">
+              <thead><tr><th>#</th><th>标签</th><th>密钥</th><th>调用数</th><th>状态</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>最近请求</h2>
+          <div class="filters">
+            <select id="log-filter">
+              <option value="">全部</option>
+              <option value="allow">放行</option>
+              <option value="block">拦截</option>
+              <option value="skip">跳过</option>
+              <option value="error">错误</option>
+            </select>
+            <button id="log-refresh" class="ghost">刷新</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="logs-table" class="table">
+            <thead><tr><th>时间</th><th>方法</th><th>路径</th><th>类型</th><th>模型</th><th>判定</th><th>分数</th><th>耗时</th><th>来源IP</th><th>原因</th><th>送检内容预览</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

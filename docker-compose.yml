@@ -1,0 +1,33 @@
+services:
+  jev-gateway:
+    build: .
+    image: jev-gateway:latest
+    container_name: jev-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # 过滤代理 (nginx 转发到这里)
+      - "127.0.0.1:8081:8081"  # 管理控制台 (默认仅本机, 生产建议置于内网/加认证)
+    environment:
+      # 首次启动可通过环境变量做一次性初始化 (已存在的值不会被覆盖):
+      JEV_UPSTREAM_URL: "${JEV_UPSTREAM_URL:-}"      # 上游, 如 http://newapi:3000
+      JEV_BASE_URL: "${JEV_BASE_URL:-https://api.typesafe.ai}"
+      JEV_API_KEY: "${JEV_API_KEY:-}"                # 初始 JEV 密钥 (可选)
+      JEV_ADMIN_PASSWORD: "${JEV_ADMIN_PASSWORD:-}"  # 初始管理员口令 (可选)
+    volumes:
+      - jev-data:/data
+    # 若 newapi 也在本 compose 中, 可用 depends_on 并以服务名互联:
+    # depends_on:
+    #   - newapi
+
+  # 示例: 将 nginx 作为最前端入口 (可选, 按需启用)
+  # nginx:
+  #   image: nginx:alpine
+  #   ports:
+  #     - "80:80"
+  #   volumes:
+  #     - ./nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
+  #   depends_on:
+  #     - jev-gateway
+
+volumes:
+  jev-data:
