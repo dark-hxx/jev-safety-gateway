@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_blank" name="shell-type"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "on-secondary-fixed-variant": "#00531c", "on-surface-variant": "#c1c6d7", "surface-dim": "#121317", "surface": "#121317", "error-container": "#93000a", "inverse-primary": "#005bc1", "on-surface": "#e3e2e7", "surface-container-lowest": "#0d0e12", "outline": "#8b90a0", "tertiary": "#ffb874", "on-primary": "#002e69", "surface-container-highest": "#343539", "surface-bright": "#38393d", "error": "#ffb4ab", "on-tertiary-fixed": "#2d1600", "outline-variant": "#414755", "on-tertiary-container": "#412200", "inverse-on-surface": "#2f3034", "on-background": "#e3e2e7", "primary-fixed-dim": "#adc6ff", "surface-container": "#1e1f23", "on-error": "#690005", "secondary-container": "#05b046", "secondary-fixed-dim": "#53e16f", "on-primary-fixed-variant": "#004493", "on-error-container": "#ffdad6", "primary-container": "#4b8eff", "primary": "#adc6ff", "background": "#121317", "tertiary-container": "#d47b00", "surface-container-low": "#1a1b1f", "on-tertiary-fixed-variant": "#6a3b00", "on-primary-container": "#00285c", "secondary": "#53e16f", "surface-tint": "#adc6ff", "on-secondary-fixed": "#002107", "surface-variant": "#343539", "tertiary-fixed": "#ffdcbf", "secondary-fixed": "#72fe88", "on-secondary": "#003911", "tertiary-fixed-dim": "#ffb874", "primary-fixed": "#d8e2ff", "on-tertiary": "#4b2800", "surface-container-high": "#292a2e", "on-primary-fixed": "#001a41", "inverse-surface": "#e3e2e7", "on-secondary-container": "#003a11" }, "borderRadius": { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" }, "spacing": { "space-xs": "0.25rem", "space-sm": "0.5rem", "space-xl": "2.25rem", "margin": "2rem", "gutter": "1.25rem", "space-lg": "1.5rem", "margin-mobile": "1rem", "gutter-mobile": "0.75rem", "space-md": "1rem" }, "fontFamily": { "code-badge": [ "JetBrains Mono" ], "footnote": [ "Plus Jakarta Sans" ], "caption-1": [ "Plus Jakarta Sans" ], "caption-2": [ "Plus Jakarta Sans" ], "display-mobile": [ "Plus Jakarta Sans" ], "title-1": [ "Plus Jakarta Sans" ], "body": [ "Plus Jakarta Sans" ], "headline": [ "Plus Jakarta Sans" ], "code-body": [ "JetBrains Mono" ], "display": [ "Plus Jakarta Sans" ], "title-3": [ "Plus Jakarta Sans" ], "callout": [ "Plus Jakarta Sans" ], "subheadline": [ "Plus Jakarta Sans" ], "title-2": [ "Plus Jakarta Sans" ] }, "fontSize": { "code-badge": [ "11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500" } ], "footnote": [ "13px", { "lineHeight": "18px", "fontWeight": "400" } ], "caption-1": [ "12px", { "lineHeight": "16px", "fontWeight": "500" } ], "caption-2": [ "11px", { "lineHeight": "13px", "fontWeight": "600" } ], "display-mobile": [ "28px", { "lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "700" } ], "title-1": [ "28px", { "lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "700" } ], "body": [ "16px", { "lineHeight": "21px", "letterSpacing": "-0.003em", "fontWeight": "400" } ], "headline": [ "17px", { "lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "600" } ], "code-body": [ "13px", { "lineHeight": "18px", "fontWeight": "400" } ], "display": [ "34px", { "lineHeight": "41px", "letterSpacing": "-0.02em", "fontWeight": "700" } ], "title-3": [ "20px", { "lineHeight": "25px", "letterSpacing": "-0.008em", "fontWeight": "600" } ], "callout": [ "15px", { "lineHeight": "20px", "letterSpacing": "-0.002em", "fontWeight": "400" } ], "subheadline": [ "14px", { "lineHeight": "18px", "fontWeight": "500" } ], "title-2": [ "22px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600" } ] } } } };</script></head><body class="bg-surface font-body text-on-surface antialiased"><main class="min-h-screen w-full flex items-center justify-center p-space-md"><div class="flex flex-col w-full items-center justify-center relative min-h-0 py-space-xl">
+<!-- Subtle Ambient Glow Gradients behind Card -->
+<div class="absolute w-96 h-96 rounded-full bg-primary-container/10 blur-3xl pointer-events-none -top-16 -left-16"></div>
+<div class="absolute w-80 h-80 rounded-full bg-secondary-container/10 blur-3xl pointer-events-none -bottom-10 -right-10"></div>
+<!-- Top Utilities Bar: Segmented Controls for Language & Mode -->
+<div class="w-full max-w-[440px] flex items-center justify-between mb-space-lg px-space-xs z-10">
+<div class="flex items-center gap-space-xs text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">verified_user</span>
+<span class="font-code-badge text-code-badge tracking-wider uppercase opacity-80">v2.4.1-rc3</span>
+</div>
+<div class="flex items-center gap-space-sm">
+<!-- Language Pill -->
+<div class="flex items-center bg-surface-container-high/80 p-0.5 rounded-full shadow-sm backdrop-blur-md">
+<button class="font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 bg-surface-bright text-on-surface shadow-sm" id="langZh" onclick="switchLang('zh')" type="button">中文</button>
+<button class="font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 text-on-surface-variant hover:text-on-surface" id="langEn" onclick="switchLang('en')" type="button">EN</button>
+</div>
+<!-- Mode Pill (Toggle Setup / Login Preview) -->
+<div class="flex items-center bg-surface-container-high/80 p-0.5 rounded-full shadow-sm backdrop-blur-md">
+<button class="font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 bg-surface-bright text-on-surface shadow-sm flex items-center gap-1" id="tabLogin" onclick="setAuthMode('login')" type="button">
+<span class="material-symbols-outlined text-[13px]">login</span>
+<span id="tabLoginText">验证登录</span>
+</button>
+<button class="font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 text-on-surface-variant hover:text-on-surface flex items-center gap-1" id="tabSetup" onclick="setAuthMode('setup')" type="button">
+<span class="material-symbols-outlined text-[13px]">key</span>
+<span id="tabSetupText">初始配置</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Primary Cupertino Auth Card (Apple HIG Elevation 2 Glass) -->
+<div class="w-full max-w-[440px] bg-surface-container/85 backdrop-blur-2xl rounded-xl shadow-2xl p-space-lg sm:p-space-xl flex flex-col items-center relative z-10 transition-all duration-300">
+<!-- App Icon & Ambient Rim Glow -->
+<div class="relative mb-space-md group">
+<div class="absolute -inset-1 rounded-xl bg-gradient-to-b from-primary-container to-inverse-primary opacity-40 blur-lg group-hover:opacity-70 transition duration-500"></div>
+<div class="relative w-20 h-20 rounded-xl overflow-hidden shadow-xl bg-surface-container-lowest flex items-center justify-center">
+<img alt="JEV Security Gateway Shield Icon" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida/AEtjO1Vj7ENt8zWWEKfMVwdNAEa6gFtHBGakE6ZIcSMNqQzdBWCNy1paserYO-uNbccsM0b05Mb0tGAiPoeUuCssD26f7mA_LWFbsCeOeh9xLG_Lx_32JgC-CUeUn02WRqkgRAxBh31MybOdGRHxDi1PfZn1UDywVcOLqvvbd7LRNHW5jNVvFOoBQPWqFb7MkaOt4usJ8107_LWlZ29OcpYGdXL41s3e4CCgHP_HUtJbJgpwFoODFOONdIqUPA"/>
+</div>
+</div>
+<!-- Title & Subtitle Hierarchy -->
+<div class="text-center mb-space-lg">
+<h1 class="font-title-2 text-title-2 text-on-surface tracking-tight" id="mainTitle">JEV 安全网关</h1>
+<p class="font-subheadline text-subheadline text-on-surface-variant mt-1" id="subTitle">AI Request Security &amp; Filtering Gateway</p>
+</div>
+<!-- Dynamic Status Banner Pill -->
+<div class="w-full mb-space-lg py-1.5 px-space-md rounded-lg flex items-center justify-center gap-space-xs bg-primary/10 text-primary transition-colors duration-200" id="statusPill">
+<span class="material-symbols-outlined text-[16px]" id="statusIcon">lock</span>
+<span class="font-caption-1 text-caption-1 font-medium tracking-tight text-center" id="statusText">输入管理员口令以访问控制台</span>
+</div>
+<!-- Authentication Form -->
+<form class="w-full flex flex-col gap-space-md" onsubmit="event.preventDefault(); handleAuthSubmit();">
+<!-- Password Input Row -->
+<div class="flex flex-col gap-1.5">
+<div class="flex justify-between items-center px-1">
+<label class="font-caption-1 text-caption-1 text-on-surface-variant font-medium" for="adminPass" id="labelPass">管理员主口令</label>
+<span class="font-code-badge text-code-badge text-on-surface-variant/70" id="passMeta">SHA-256 Auth</span>
+</div>
+<div class="relative flex items-center bg-surface-container-high rounded-lg transition-all focus-within:bg-surface-container-highest shadow-inner">
+<span class="material-symbols-outlined text-outline absolute left-3 text-[19px] pointer-events-none">shield_locked</span>
+<input autocomplete="current-password" class="w-full bg-transparent pl-10 pr-10 py-2.5 font-body text-body text-on-surface placeholder:text-outline-variant/60 focus:outline-none" id="adminPass" placeholder="••••••••" required="" type="password"/>
+<button class="absolute right-2.5 text-outline hover:text-on-surface transition-colors p-1 flex items-center justify-center" onclick="togglePasswordVisibility('adminPass', 'passEyeIcon')" tabindex="-1" title="Toggle visibility" type="button">
+<span class="material-symbols-outlined text-[18px]" id="passEyeIcon">visibility_off</span>
+</button>
+</div>
+</div>
+<!-- Confirm Password Row (Conditional via Setup Mode) -->
+<div class="hidden flex-col gap-1.5" id="confirmPassContainer">
+<div class="flex justify-between items-center px-1">
+<label class="font-caption-1 text-caption-1 text-on-surface-variant font-medium" for="confirmPass" id="labelConfirm">重复确认新口令</label>
+<span class="font-code-badge text-code-badge text-tertiary">至少6位字符</span>
+</div>
+<div class="relative flex items-center bg-surface-container-high rounded-lg transition-all focus-within:bg-surface-container-highest shadow-inner">
+<span class="material-symbols-outlined text-outline absolute left-3 text-[19px] pointer-events-none">pin</span>
+<input autocomplete="new-password" class="w-full bg-transparent pl-10 pr-10 py-2.5 font-body text-body text-on-surface placeholder:text-outline-variant/60 focus:outline-none" id="confirmPass" placeholder="••••••••" type="password"/>
+<button class="absolute right-2.5 text-outline hover:text-on-surface transition-colors p-1 flex items-center justify-center" onclick="togglePasswordVisibility('confirmPass', 'confirmEyeIcon')" tabindex="-1" title="Toggle visibility" type="button">
+<span class="material-symbols-outlined text-[18px]" id="confirmEyeIcon">visibility_off</span>
+</button>
+</div>
+</div>
+<!-- Security Option Checkbox / Quick Toggle -->
+<div class="flex items-center justify-between px-1 pt-1">
+<label class="flex items-center gap-2 cursor-pointer select-none">
+<input checked="" class="accent-primary-container w-4 h-4 rounded cursor-pointer bg-surface-container-high" id="rememberSession" type="checkbox"/>
+<span class="font-caption-1 text-caption-1 text-on-surface-variant" id="labelRemember">保持本工作站受信任凭据 (24h)</span>
+</label>
+<button class="font-caption-2 text-caption-2 text-primary hover:underline" id="labelResetHelp" onclick="triggerHelpSheet()" type="button">重置安全凭据?</button>
+</div>
+<!-- Action Button (iOS Apple System Blue) -->
+<button class="w-full mt-space-sm bg-primary-container text-on-primary font-headline text-headline py-2.5 px-space-md rounded-lg shadow-md hover:opacity-95 active:scale-[0.99] transition duration-150 flex items-center justify-center gap-space-xs font-semibold" id="submitBtn" type="submit">
+<span id="submitBtnText">登录控制台</span>
+<span class="material-symbols-outlined text-[19px]">arrow_forward</span>
+</button>
+</form>
+<!-- System Daemon Health Pill (Telemetry Feed) -->
+<div class="w-full mt-space-lg pt-space-md flex flex-col items-center gap-space-xs">
+<div class="flex items-center gap-2 px-space-md py-1 rounded-full bg-surface-container-high/90 text-on-surface shadow-sm">
+<span class="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_currentColor] animate-pulse"></span>
+<span class="font-code-badge text-code-badge tracking-tight text-on-surface-variant">
+<span id="daemonLabel">守护进程活跃</span> · <span class="text-on-surface font-semibold">127.0.0.1:8080</span>
+</span>
+</div>
+<!-- Inset Divider & Security Badges -->
+<div class="w-full flex items-center justify-between pt-space-sm text-on-surface-variant/60 font-code-badge text-[10px]">
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px] text-secondary">memory</span>
+          LATENCY &lt;1.8ms
+        </span>
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px] text-primary">encrypted</span>
+          ZERO-TRUST TLS
+        </span>
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px] text-tertiary">rule</span>
+          PII SHIELD ACTIVE
+        </span>
+</div>
+</div>
+<!-- Apple-style Footer Signature -->
+<div class="mt-space-lg text-center font-caption-2 text-caption-2 text-on-surface-variant/60">
+      Typesafe AI / JEV Core Protected
+    </div>
+</div>
+<!-- Notification Toast Modal (Hidden by Default) -->
+<div class="hidden fixed bottom-8 z-50 bg-surface-container-highest/95 backdrop-blur-xl text-on-surface font-subheadline text-subheadline px-space-lg py-2.5 rounded-full shadow-2xl items-center gap-2 transition-all" id="toastMessage">
+<span class="material-symbols-outlined text-secondary text-[18px]" id="toastIcon">check_circle</span>
+<span id="toastText">操作成功</span>
+</div>
+</div>
+<script>
+  let currentLang = 'zh';
+  let currentMode = 'login';
+
+  const strings = {
+    zh: {
+      title: 'JEV 安全网关',
+      subtitle: 'AI Request Security & Filtering Gateway',
+      loginStatus: '输入管理员口令以访问控制台',
+      setupStatus: '首次使用：请设置管理员口令（至少6位）',
+      labelPass: '管理员主口令',
+      labelConfirm: '重复确认新口令',
+      passMeta: 'SHA-256 授权',
+      passMetaSetup: '高强度加密',
+      remember: '保持本工作站受信任凭据 (24h)',
+      resetHelp: '重置安全凭据?',
+      submitLogin: '登录控制台',
+      submitSetup: '完成设置并进入',
+      tabLogin: '验证登录',
+      tabSetup: '初始配置',
+      daemon: '守护进程活跃',
+      pwdLengthErr: '口令长度须大于或等于6位',
+      pwdMismatch: '两次输入的口令不一致',
+      loginSuccess: '验证通过，正在载入安全控制台...',
+      setupSuccess: '网关密钥已初始化并激活！',
+      copiedHelp: '系统救援模式：已向系统日志打印物理重置密钥指南'
+    },
+    en: {
+      title: 'JEV Security Gateway',
+      subtitle: 'AI Request Security & Filtering Gateway',
+      loginStatus: 'Enter master credentials to access console',
+      setupStatus: 'Initial Setup: Configure root passcode (min 6 chars)',
+      labelPass: 'Master Passcode',
+      labelConfirm: 'Confirm Passcode',
+      passMeta: 'SHA-256 Auth',
+      passMetaSetup: 'Argon2id Enforced',
+      remember: 'Keep workstation trusted (24h)',
+      resetHelp: 'Credential recovery?',
+      submitLogin: 'Authenticate & Enter',
+      submitSetup: 'Complete Setup & Launch',
+      tabLogin: 'Sign In',
+      tabSetup: 'Provision',
+      daemon: 'Daemon Active',
+      pwdLengthErr: 'Passcode must be at least 6 characters',
+      pwdMismatch: 'Passcodes do not match',
+      loginSuccess: 'Access authorized, dispatching telemetry...',
+      setupSuccess: 'Gateway master key initialized successfully!',
+      copiedHelp: 'Rescue Mode: Physical reset instructions emitted to console daemon'
+    }
+  };
+
+  function setAuthMode(mode) {
+    currentMode = mode;
+    const confirmBox = document.getElementById('confirmPassContainer');
+    const statusPill = document.getElementById('statusPill');
+    const statusText = document.getElementById('statusText');
+    const statusIcon = document.getElementById('statusIcon');
+    const submitBtnText = document.getElementById('submitBtnText');
+    const passMeta = document.getElementById('passMeta');
+
+    const tabLogin = document.getElementById('tabLogin');
+    const tabSetup = document.getElementById('tabSetup');
+
+    if (mode === 'setup') {
+      confirmBox.classList.remove('hidden');
+      confirmBox.classList.add('flex');
+      statusPill.className = 'w-full mb-space-lg py-1.5 px-space-md rounded-lg flex items-center justify-center gap-space-xs bg-tertiary-container/20 text-tertiary transition-colors duration-200';
+      statusIcon.textContent = 'app_registration';
+      statusText.textContent = strings[currentLang].setupStatus;
+      submitBtnText.textContent = strings[currentLang].submitSetup;
+      passMeta.textContent = strings[currentLang].passMetaSetup;
+
+      tabSetup.className = 'font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 bg-surface-bright text-on-surface shadow-sm flex items-center gap-1';
+      tabLogin.className = 'font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 text-on-surface-variant hover:text-on-surface flex items-center gap-1';
+    } else {
+      confirmBox.classList.add('hidden');
+      confirmBox.classList.remove('flex');
+      statusPill.className = 'w-full mb-space-lg py-1.5 px-space-md rounded-lg flex items-center justify-center gap-space-xs bg-primary/10 text-primary transition-colors duration-200';
+      statusIcon.textContent = 'lock';
+      statusText.textContent = strings[currentLang].loginStatus;
+      submitBtnText.textContent = strings[currentLang].submitLogin;
+      passMeta.textContent = strings[currentLang].passMeta;
+
+      tabLogin.className = 'font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 bg-surface-bright text-on-surface shadow-sm flex items-center gap-1';
+      tabSetup.className = 'font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 text-on-surface-variant hover:text-on-surface flex items-center gap-1';
+    }
+  }
+
+  function switchLang(lang) {
+    currentLang = lang;
+    const l = strings[lang];
+    document.getElementById('mainTitle').textContent = l.title;
+    document.getElementById('subTitle').textContent = l.subtitle;
+    document.getElementById('labelPass').textContent = l.labelPass;
+    document.getElementById('labelConfirm').textContent = l.labelConfirm;
+    document.getElementById('labelRemember').textContent = l.remember;
+    document.getElementById('labelResetHelp').textContent = l.resetHelp;
+    document.getElementById('tabLoginText').textContent = l.tabLogin;
+    document.getElementById('tabSetupText').textContent = l.tabSetup;
+    document.getElementById('daemonLabel').textContent = l.daemon;
+
+    // Refresh mode strings
+    setAuthMode(currentMode);
+
+    const btnZh = document.getElementById('langZh');
+    const btnEn = document.getElementById('langEn');
+    if (lang === 'zh') {
+      btnZh.className = 'font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 bg-surface-bright text-on-surface shadow-sm';
+      btnEn.className = 'font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 text-on-surface-variant hover:text-on-surface';
+    } else {
+      btnEn.className = 'font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 bg-surface-bright text-on-surface shadow-sm';
+      btnZh.className = 'font-caption-2 text-caption-2 px-space-sm py-0.5 rounded-full transition-all duration-200 text-on-surface-variant hover:text-on-surface';
+    }
+  }
+
+  function togglePasswordVisibility(inputId, iconId) {
+    const input = document.getElementById(inputId);
+    const icon = document.getElementById(iconId);
+    if (!input || !icon) return;
+
+    if (input.type === 'password') {
+      input.type = 'text';
+      icon.textContent = 'visibility';
+    } else {
+      input.type = 'password';
+      icon.textContent = 'visibility_off';
+    }
+  }
+
+  function showToast(msg, isError = false) {
+    const toast = document.getElementById('toastMessage');
+    const toastText = document.getElementById('toastText');
+    const toastIcon = document.getElementById('toastIcon');
+
+    toastText.textContent = msg;
+    if (isError) {
+      toastIcon.textContent = 'error';
+      toastIcon.className = 'material-symbols-outlined text-error text-[18px]';
+    } else {
+      toastIcon.textContent = 'check_circle';
+      toastIcon.className = 'material-symbols-outlined text-secondary text-[18px]';
+    }
+
+    toast.classList.remove('hidden');
+    toast.classList.add('flex');
+
+    setTimeout(() => {
+      toast.classList.add('hidden');
+      toast.classList.remove('flex');
+    }, 2800);
+  }
+
+  function handleAuthSubmit() {
+    const pass = document.getElementById('adminPass').value;
+    const l = strings[currentLang];
+
+    if (!pass || pass.length < 6) {
+      showToast(l.pwdLengthErr, true);
+      return;
+    }
+
+    if (currentMode === 'setup') {
+      const confirm = document.getElementById('confirmPass').value;
+      if (pass !== confirm) {
+        showToast(l.pwdMismatch, true);
+        return;
+      }
+      showToast(l.setupSuccess, false);
+      setTimeout(() => setAuthMode('login'), 1200);
+    } else {
+      showToast(l.loginSuccess, false);
+    }
+  }
+
+  function triggerHelpSheet() {
+    showToast(strings[currentLang].copiedHelp, false);
+  }
+</script></main></body></html>
