@@ -21,6 +21,7 @@ import (
 	"jev-gateway/internal/config"
 	"jev-gateway/internal/extract"
 	"jev-gateway/internal/jev"
+	"jev-gateway/internal/logx"
 )
 
 // Handler is the filtering reverse proxy HTTP handler.
@@ -50,16 +51,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	set := h.store.Settings()
 
+	ip := clientIP(r)
+	logx.Debugf("→ %s %s ip=%s ct=%q", r.Method, r.URL.Path, ip, r.Header.Get("Content-Type"))
+
 	if set.UpstreamBaseURL == "" {
 		http.Error(w, `{"error":{"message":"gateway upstream not configured"}}`, http.StatusBadGateway)
 		return
 	}
 
-	ip := clientIP(r)
-
 	// Fast path: reject IPs already banned for abuse, without calling JEV.
 	if set.Enabled && set.AbuseEnabled {
 		if banned, until := h.abuse.Banned(ip, start); banned {
+			logx.Debugf("  ip=%s is banned until %s → 429", ip, until.Format("15:04:05"))
 			h.store.AddLog(config.LogEntry{
 				TS: start, Method: r.Method, Path: r.URL.Path, Kind: "abuse",
 				Decision: "block", LatencyMS: time.Since(start).Milliseconds(),
@@ -77,8 +80,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"failed to read request body"}}`, http.StatusBadRequest)
 		return
 	}
+	logx.Debugf("  body=%d bytes", len(body))
 
 	decision, kind, model, score, reason, snippet := h.decide(r, set, body)
+	logx.Debugf("  decision=%s kind=%s model=%q score=%s reason=%q snippet=%q",
+		decision, kind, model, scoreStr(score), reason, snippet)
 
 	// A genuine harmful-content block (score present) counts as a strike; enough
 	// strikes within the window ban the IP.
@@ -242,6 +248,10 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, set config.Set
 			req.ContentLength = int64(len(body))
 			req.Header.Set("X-JEV-Gateway", "allow")
 		},
+		ModifyResponse: func(resp *http.Response) error {
+			logx.Debugf("  ← upstream %d %s (stream passthrough)", resp.StatusCode, resp.Request.URL)
+			return nil
+		},
 		ErrorHandler: func(rw http.ResponseWriter, _ *http.Request, err error) {
 			log.Printf("upstream proxy error: %v", err)
 			rw.Header().Set("Content-Type", "application/json")
@@ -249,6 +259,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, set config.Set
 			_, _ = rw.Write([]byte(`{"error":{"message":"upstream request failed"}}`))
 		},
 	}
+	logx.Debugf("  → forwarding to %s (stream)", singleJoin(target.String(), r.URL.Path))
 	rp.ServeHTTP(w, r)
 }
 
@@ -305,6 +316,7 @@ func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start t
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	logx.Debugf("  ← upstream %d %s resp=%d bytes (buffered for audit)", resp.StatusCode, outURL.String(), len(respBody))
 
 	// Only audit successful, textual responses; pass errors straight through.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -408,4 +420,11 @@ func clientIP(r *http.Request) string {
 func formatScore(f float64) string {
 	b, _ := json.Marshal(f)
 	return string(b)
+}
+
+func scoreStr(f *float64) string {
+	if f == nil {
+		return "-"
+	}
+	return strconv.FormatFloat(*f, 'f', 3, 64)
 }

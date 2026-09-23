@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"jev-gateway/internal/config"
+	"jev-gateway/internal/logx"
 	"jev-gateway/internal/server"
 	"jev-gateway/web"
 )
@@ -21,6 +22,12 @@ func main() {
 	dbPath := env("JEV_DB_PATH", "/data/gateway.db")
 	proxyAddr := env("JEV_PROXY_ADDR", ":8080")
 	adminAddr := env("JEV_ADMIN_ADDR", ":8081")
+
+	// Verbose per-request tracing for development.
+	logx.Debug = truthy(os.Getenv("JEV_DEBUG"))
+	if logx.Debug {
+		log.Println("debug logging enabled (JEV_DEBUG)")
+	}
 
 	store, err := config.Open(dbPath)
 	if err != nil {
@@ -83,4 +90,12 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func truthy(v string) bool {
+	switch v {
+	case "1", "true", "TRUE", "True", "yes", "on":
+		return true
+	}
+	return false
 }
