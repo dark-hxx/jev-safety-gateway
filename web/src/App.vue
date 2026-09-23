@@ -109,11 +109,11 @@ async function onSettingsSaved(updated: Settings): Promise<void> {
  */
 function syncTitle(): void {
   if (!authed.value) {
-    document.title = needsSetup.value ? '初始配置 · JEV Gateway' : '登录 · JEV Gateway'
+    document.title = needsSetup.value ? '初始配置 · JEV Safety Gateway' : '登录 · JEV Safety Gateway'
     return
   }
   const t = route.meta.title as { zh?: string } | undefined
-  document.title = t?.zh ? `${t.zh} · JEV Gateway` : 'JEV Gateway'
+  document.title = t?.zh ? `${t.zh} · JEV Safety Gateway` : 'JEV Safety Gateway'
 }
 
 router.afterEach(syncTitle)

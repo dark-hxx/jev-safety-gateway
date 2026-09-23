@@ -1,4 +1,4 @@
-// Command gateway is a JEV-backed API request filtering reverse proxy.
+// Command jev-safety-gateway is a JEV-backed API request filtering reverse proxy.
 //
 // It reads each incoming request, extracts the user input based on the API
 // path, evaluates it with the TypeSafe/JEV model, and forwards safe requests to
@@ -12,14 +12,17 @@ import (
 	"os/signal"
 	"syscall"
 
-	"jev-gateway/internal/config"
-	"jev-gateway/internal/logx"
-	"jev-gateway/internal/server"
-	"jev-gateway/web"
+	"jev-safety-gateway/internal/config"
+	"jev-safety-gateway/internal/logx"
+	"jev-safety-gateway/internal/server"
+	"jev-safety-gateway/web"
 )
 
 func main() {
-	dbPath := env("JEV_DB_PATH", "/data/gateway.db")
+	// The default is relative to the working directory so a local run lands in
+	// <cwd>/data/ and needs no override. Docker pins the absolute /data path via
+	// ENV (see Dockerfile), where the compose volume is mounted.
+	dbPath := env("JEV_DB_PATH", "./data/jev-safety-gateway.db")
 	proxyAddr := env("JEV_PROXY_ADDR", ":8080")
 	adminAddr := env("JEV_ADMIN_ADDR", ":8081")
 
@@ -38,7 +41,10 @@ func main() {
 	// Optional bootstrap from environment on first run.
 	bootstrap(store)
 
-	srv := server.New(store, web.FS(), proxyAddr, adminAddr)
+	// The admin console reports the bound endpoints, so hand it a value that
+	// outlives this call: Run fills the addresses in once it has listened.
+	info := buildInfo()
+	srv := server.New(store, web.FS(), proxyAddr, adminAddr, &info)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

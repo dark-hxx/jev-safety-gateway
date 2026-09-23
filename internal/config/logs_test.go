@@ -14,7 +14,7 @@ import (
 // newLogStore opens a store with a few audit rows covering the fields under test.
 func newLogStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
+	store, err := Open(filepath.Join(t.TempDir(), "jev-safety-gateway.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestLogModelsListsExistingValuesByCount(t *testing.T) {
 
 // 出现次数多的模型排在最前，便于直接选到常用值。
 func TestLogModelsOrdersByCountFirst(t *testing.T) {
-	store, err := Open(filepath.Join(t.TempDir(), "gateway.db"))
+	store, err := Open(filepath.Join(t.TempDir(), "jev-safety-gateway.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

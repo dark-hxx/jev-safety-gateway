@@ -1,12 +1,15 @@
 /**
  * 管理接口客户端。只调用 internal/admin 已存在的路由：
  *   POST /api/login  POST /api/setup  GET /api/setup-status  POST /api/logout
+ *   GET  /api/version   （免鉴权：登录页在登录前就要读构建信息与监听地址）
  *   GET  /api/state  GET/PUT /api/settings
  *   GET/POST /api/keys  POST /api/keys/{id}/enable|disable  DELETE /api/keys/{id}
  *   GET  /api/logs   GET /api/logs/models   GET /api/stats?hours=
+ *   GET  /api/stats/latency?hours=
  */
 import type {
   JEVKey,
+  LatencyStats,
   LogEntry,
   LogModelsResponse,
   LogsResponse,
@@ -17,6 +20,7 @@ import type {
   StateResponse,
   Stats,
   StatsResponse,
+  VersionInfo,
 } from './types'
 
 const TOKEN_KEY = 'jev_admin_token'
@@ -109,6 +113,16 @@ export async function logout(): Promise<void> {
   }
 }
 
+// --- 系统信息 ---
+
+/**
+ * `GET /api/version`：构建标识与监听地址。**免鉴权**——登录页要在拿到 token
+ * 之前显示它们。响应里没有任何审计数据，延迟分位在受保护的 `/api/stats/latency`。
+ */
+export function getVersion(): Promise<VersionInfo> {
+  return request<VersionInfo>('/api/version')
+}
+
 // --- 状态 / 配置 / 密钥 ---
 
 /** `GET /api/state`：后端在没有密钥时返回 `keys: null`，这里归一化为空数组。 */
@@ -153,6 +167,14 @@ export function getStats(hours: number): Promise<StatsResponse> {
   return request<StatsResponse>(`/api/stats?hours=${encodeURIComponent(String(hours))}`)
 }
 
+/**
+ * `GET /api/stats/latency?hours=`：区间内单请求总耗时的分位数。
+ * 派生自审计日志，因此需要 token（与免鉴权的 `/api/version` 不同）。
+ */
+export function getLatency(hours: number): Promise<LatencyStats> {
+  return request<LatencyStats>(`/api/stats/latency?hours=${encodeURIComponent(String(hours))}`)
+}
+
 /** `/api/logs` 的筛选条件，语义与 internal/config.LogFilter 一致（条件之间为「与」）。 */
 export interface LogFilter {
   limit: number
@@ -191,4 +213,4 @@ export function queryLogModels(since: number): Promise<LogModelsResponse> {
   return request<LogModelsResponse>('/api/logs/models?' + p.toString())
 }
 
-export type { JEVKey, LogEntry, LogModelsResponse, LogsResponse, ModelCount, Settings, StatBucket, Stats, StatsResponse, StateResponse }
+export type { JEVKey, LatencyStats, LogEntry, LogModelsResponse, LogsResponse, ModelCount, Settings, StatBucket, Stats, StatsResponse, StateResponse, VersionInfo }

@@ -12,13 +12,13 @@ Requires Go 1.23+.
 
 ```bash
 go mod tidy                          # first time / after dependency changes (generates go.sum)
-go build -o gateway ./cmd/gateway    # produces gateway.exe on Windows
+go build -o jev-safety-gateway ./cmd/jev-safety-gateway   # produces jev-safety-gateway.exe on Windows
 go vet ./...                         # static checks
 go test ./...                        # unit tests (config aggregation, admin API + SPA fallback, embedded dist)
 
-# run locally (default /data path is unwritable on Windows, so override it)
-JEV_DB_PATH=./data/gateway.db JEV_PROXY_ADDR=:8080 JEV_ADMIN_ADDR=:8081 ./gateway
-# PowerShell: $env:JEV_DB_PATH="./data/gateway.db"; ./gateway.exe
+# run locally — the DB lands in ./data/jev-safety-gateway.db relative to the working directory
+JEV_PROXY_ADDR=:8080 JEV_ADMIN_ADDR=:8081 ./jev-safety-gateway
+# PowerShell: .\jev-safety-gateway.exe    (the listen-address defaults are already :8080 / :8081)
 
 # admin console frontend — ONLY needed when web/src changes; web/dist is committed
 npm --prefix web install             # first time
@@ -76,10 +76,17 @@ The `noul` score means **higher = safer** when the instruction is phrased "is th
 
 ## Configuration model
 
-Settings are runtime-editable from the admin console and persisted in SQLite — they are the source of truth. `load()` decodes the stored blob **on top of `DefaultSettings()`**, so a key missing from the blob (a setting added by a newer build) keeps its default instead of silently reading as the zero value. Environment variables (`JEV_UPSTREAM_URL`, `JEV_BASE_URL`, `JEV_API_KEY`, `JEV_ADMIN_PASSWORD`) only **bootstrap first-run values and never overwrite existing DB values** (see `bootstrap` in `cmd/gateway/main.go`). Infra vars `JEV_DB_PATH` / `JEV_PROXY_ADDR` / `JEV_ADMIN_ADDR` are read every start.
+Settings are runtime-editable from the admin console and persisted in SQLite — they are the source of truth. `load()` decodes the stored blob **on top of `DefaultSettings()`**, so a key missing from the blob (a setting added by a newer build) keeps its default instead of silently reading as the zero value. Environment variables (`JEV_UPSTREAM_URL`, `JEV_BASE_URL`, `JEV_API_KEY`, `JEV_ADMIN_PASSWORD`) only **bootstrap first-run values and never overwrite existing DB values** (see `bootstrap` in `cmd/jev-safety-gateway/main.go`). Infra vars `JEV_DB_PATH` / `JEV_PROXY_ADDR` / `JEV_ADMIN_ADDR` are read every start.
 
 ## Notes
 
+- **绝不删除 `data/` 下的任何文件**（`jev-safety-gateway.db` 及其 `-wal` / `-shm`）。这是本地运行态：
+  不受版本控制、`rm` 不进回收站、本机没有卷影副本——删掉就是永久丢失，无法找回。清理任务、打包脚本、
+  "清空输出目录" 一类操作一律不得把它作为目标；需要重置配置时必须先取得用户明确同意，并先备份副本。
+  注意 `jev-safety-gateway.db-wal` 可能远大于主库（实测主库 40 KB / WAL 3.4 MB），数据主要落在 WAL 里，
+  单独留下主库没有意义——三者必须作为一个整体保护。本地 test 启动脚本（`scripts/start-local-test.ps1`）
+  默认就把库写在这个仓库根 `data/` 下，`-DbPath` 换了位置也一样受此规则保护。
+  （测试包内 `out/<pkg>/data/` 是一次性构建产物，不受此限。）
 - Default `SafetyInstruction` and `BlockMessage` are Chinese; the README is Chinese. Match the existing language in user-facing strings.
 - Logging to SQLite is best-effort (errors ignored) — never let logging failures break the request path.
 

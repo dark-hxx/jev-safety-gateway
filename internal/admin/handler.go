@@ -7,12 +7,29 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"jev-gateway/internal/config"
+	"jev-safety-gateway/internal/config"
 )
+
+// Info is the console's self-description, served by GET /api/version.
+//
+// The addresses are filled in by internal/server once the listeners are
+// actually bound, which is why this is handed around as a pointer: the console
+// should report the endpoints that came up, not the strings that were
+// configured.
+type Info struct {
+	Version string
+	Commit  string
+	BuiltAt string
+	Go      string
+
+	ProxyAddr string
+	AdminAddr string
+}
 
 // Handler is the admin HTTP handler (API + static UI).
 type Handler struct {
@@ -20,14 +37,18 @@ type Handler struct {
 	sess  *sessions
 	ui    http.Handler
 	mux   *http.ServeMux
+	info  *Info
 }
 
 // New builds the admin handler. webFS should contain index.html at its root.
-func New(store *config.Store, webFS fs.FS) *Handler {
+// info may be nil, in which case /api/version reports the running Go version
+// and zero addresses rather than failing.
+func New(store *config.Store, webFS fs.FS, info *Info) *Handler {
 	h := &Handler{
 		store: store,
 		sess:  newSessions(12 * time.Hour),
 		ui:    spaFileServer(webFS),
+		info:  info,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/login", h.login)
@@ -39,8 +60,14 @@ func New(store *config.Store, webFS fs.FS) *Handler {
 	mux.HandleFunc("/api/logs", h.auth(h.logs))
 	mux.HandleFunc("/api/logs/models", h.auth(h.logModels))
 	mux.HandleFunc("/api/stats", h.auth(h.stats))
+	mux.HandleFunc("/api/stats/latency", h.auth(h.latency))
 	mux.HandleFunc("/api/setup-status", h.setupStatus)
 	mux.HandleFunc("/api/setup", h.setup)
+	// Deliberately not wrapped in h.auth: the login screen renders the build
+	// identity and the daemon address before any token exists. Nothing here is
+	// derived from the audit log — keep it that way, and keep latency (which is)
+	// behind auth under /api/stats/latency.
+	mux.HandleFunc("/api/version", h.version)
 	mux.Handle("/", h.ui)
 	h.mux = mux
 	return h
@@ -58,6 +85,32 @@ func (h *Handler) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// --- version (public) ---
+
+// version reports the build identity and the bound listen addresses. It is the
+// one /api/ route that answers without a token, because the login screen shows
+// the build badge and the daemon address before anyone has logged in. The
+// payload is limited to facts the caller can already observe; anything derived
+// from the audit log stays behind auth.
+func (h *Handler) version(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, errBody("method not allowed"))
+		return
+	}
+	info := Info{Version: "dev", Go: runtime.Version()}
+	if h.info != nil {
+		info = *h.info
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"version":    info.Version,
+		"commit":     info.Commit,
+		"built_at":   info.BuiltAt,
+		"go":         info.Go,
+		"proxy_addr": info.ProxyAddr,
+		"admin_addr": info.AdminAddr,
+	})
 }
 
 // --- setup / login ---
@@ -265,10 +318,7 @@ func (h *Handler) logModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
-	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
-	if hours <= 0 {
-		hours = 24
-	}
+	hours := hoursParam(r)
 	now := time.Now()
 	since := now.Add(-time.Duration(hours) * time.Hour)
 	st, err := h.store.StatsSince(since)
@@ -304,7 +354,37 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// latency reports the latency distribution of the window from the audit log.
+// Unlike /api/version this one needs a token: percentiles over the request log
+// leak traffic volume and timing to anyone who can reach the admin port.
+func (h *Handler) latency(w http.ResponseWriter, r *http.Request) {
+	st, err := h.store.LatencySince(time.Now().Add(-time.Duration(hoursParam(r)) * time.Hour))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
 // --- helpers ---
+
+// maxWindowHours caps the window any stats endpoint will honour. A caller asking
+// for a decade of history should not be able to turn one request into a scan of
+// the whole log table.
+const maxWindowHours = 720 // 30 days
+
+// hoursParam reads the `hours` window selector shared by /api/stats and
+// /api/stats/latency: default 24, clamped to [1, maxWindowHours].
+func hoursParam(r *http.Request) int {
+	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
+	if hours <= 0 {
+		return 24
+	}
+	if hours > maxWindowHours {
+		return maxWindowHours
+	}
+	return hours
+}
 
 // spaFileServer serves the embedded console and falls back to index.html for
 // GET/HEAD paths that name no real file. The console is a vue-router

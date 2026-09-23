@@ -13,14 +13,15 @@ import ScoreDistribution from './ScoreDistribution.vue'
 /**
  * 运行概览（驾驶舱）。
  *
- * 真实数据来源：`GET /api/stats?hours=`（区间总量 + 分桶序列 + 分值直方图）
- * 与 `GET /api/state` 的 `stats24h`（首屏快照）。
+ * 真实数据来源：`GET /api/stats?hours=`（区间总量 + 分桶序列 + 分值直方图）、
+ * `GET /api/stats/latency?hours=`（单请求总耗时的分位数）与 `GET /api/state`
+ * 的 `stats24h`（首屏快照）。
  *
  * 两张图都只渲染后端给出的数字：趋势图按响应的 `bucket_seconds`/`series` 画线，
  * 分桶与空桶补零都在后端完成；分值分布直接用 `score_buckets`/`unscored`。
  * 前端不自行分桶、不插值、不估算占比。
  *
- * 原型中其余缺少后端来源的元素（多集群节点与地理位置、P99 延迟、峰值 PPS、
+ * 原型中其余缺少后端来源的元素（多集群节点与地理位置、峰值 PPS、
  * Token 估算、SLA/Overhead、同比环比）一律以 `NotConnected` 降级态呈现，
  * 不显示任何无来源数值。
  */
@@ -45,6 +46,8 @@ const series = ref<StatsResponse['series']>([])
 const scoreBuckets = ref<number[]>([])
 const unscored = ref(0)
 const bucketSeconds = ref(0)
+/** 延迟分位数；取不到时为 null，卡片回退降级态。 */
+const latency = ref<api.LatencyStats | null>(null)
 const loading = ref(false)
 const loaded = ref(false)
 const loadError = ref('')
@@ -53,6 +56,8 @@ const refreshedAt = ref<Date | null>(null)
 async function loadStats(): Promise<void> {
   loading.value = true
   loadError.value = ''
+  // 延迟独立取：它失败只该让那一张卡片降级，不该把整个看板拖成错误态。
+  void loadLatency()
   try {
     const r = await api.getStats(range.value.hours)
     stats.value = r
@@ -66,6 +71,14 @@ async function loadStats(): Promise<void> {
     loadError.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadLatency(): Promise<void> {
+  try {
+    latency.value = await api.getLatency(range.value.hours)
+  } catch {
+    latency.value = null
   }
 }
 
@@ -92,6 +105,9 @@ function selectRange(i: number): void {
 let timer: number | undefined
 onMounted(() => {
   if (stats24h.value) stats.value = { ...stats24h.value }
+  // 首屏立即取一次：`stats24h` 快照里没有分桶序列与延迟分位，若等到第一次轮询
+  // （5 秒后）才取，图表和 P99 卡片会先空置一拍。
+  void loadStats()
   timer = window.setInterval(() => void loadStats(), 5000)
 })
 onBeforeUnmount(() => {
@@ -106,6 +122,23 @@ const skippedShare = computed(() => pctText(stats.value.skipped, stats.value.tot
 const errorShare = computed(() => pctText(stats.value.errors, stats.value.total))
 
 const adminHost = computed(() => (typeof location !== 'undefined' ? location.host : ''))
+
+/** P99 卡片副信息：给出中位数与样本量，让 P99 有个参照。 */
+const latencyDetail = computed(() => {
+  const l = latency.value
+  if (!l || l.count === 0) return ''
+  return `P50 ${l.p50} ms · P95 ${l.p95} ms · ${num(l.count)} 次请求`
+})
+
+/**
+ * 卡片底注。取样时如实标注为近似值——`sampled` 为真表示区间内的记录数超过了后端
+ * 取样上限，分位数由按时间均匀的样本算出，不能当成整体分位数。
+ */
+const latencyCaption = computed(() => {
+  const l = latency.value
+  if (!l || l.count === 0) return '延迟分布未接入'
+  return l.sampled ? '记录数超出取样上限，以上为按时间均匀采样的近似值' : '区间内全部请求的端到端耗时'
+})
 </script>
 
 <template>
@@ -254,13 +287,21 @@ const adminHost = computed(() => (typeof location !== 'undefined' ? location.hos
 
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
         <div class="flex items-center justify-between">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">P99 检定延迟</span>
+          <!-- 口径是整条请求的总耗时（检定 + 转发），与审计页「网关耗时」一致；
+               logs 未拆分阶段，所以不叫「检定延迟」 -->
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant">P99 网关耗时</span>
           <Icon name="gauge" class="text-primary text-[18px]" />
         </div>
         <div class="my-space-sm">
-          <NotConnected reason="logs 表只存单请求耗时，没有延迟分位数聚合接口。" />
+          <template v-if="latency && latency.count > 0">
+            <div class="text-title-2 font-title-2 text-primary tracking-tight mono">
+              {{ latency.p99 }}<span class="text-caption-1 font-caption-1 text-on-surface-variant ml-1">ms</span>
+            </div>
+            <div class="text-caption-2 font-caption-2 text-on-surface-variant mt-0.5">{{ latencyDetail }}</div>
+          </template>
+          <NotConnected v-else reason="区间内没有可统计的请求记录，无法给出延迟分位。" />
         </div>
-        <div class="text-caption-2 font-caption-2 text-outline">延迟分布未接入</div>
+        <div class="text-caption-2 font-caption-2 text-outline">{{ latencyCaption }}</div>
       </div>
     </section>
 

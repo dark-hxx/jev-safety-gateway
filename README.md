@@ -105,7 +105,7 @@ docker compose up -d --build
 
 | 变量 | 说明 |
 |---|---|
-| `JEV_DB_PATH` | SQLite 路径（默认 `/data/gateway.db`） |
+| `JEV_DB_PATH` | SQLite 路径（默认 `./data/jev-safety-gateway.db`，相对启动时的工作目录；Docker 镜像内由 `ENV` 固定为 `/data/jev-safety-gateway.db`） |
 | `JEV_PROXY_ADDR` | 代理监听地址（默认 `:8080`） |
 | `JEV_ADMIN_ADDR` | 控制台监听地址（默认 `:8081`） |
 | `JEV_UPSTREAM_URL` | 初始上游地址 |
@@ -132,15 +132,32 @@ curl http://localhost:8080/v1/chat/completions \
 
 ```powershell
 go mod tidy                        # 首次：拉取依赖并生成 go.sum（需联网）
-go build -o .\gateway.exe .\cmd\gateway
+go build -o .\jev-safety-gateway.exe .\cmd\jev-safety-gateway
 ```
+
+版本号、提交号与构建时间通过链接期注入（控制台登录页与壳层底部展示，见 `GET /api/version`）：
+
+```powershell
+$ver = (Get-Content .\web\package.json -Raw -Encoding UTF8 | ConvertFrom-Json).version
+$sha = (git rev-parse --short HEAD)
+$now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+go build -trimpath -ldflags "-s -w -X main.version=$ver -X main.commit=$sha -X main.buildTime=$now" `
+  -o .\jev-safety-gateway.exe .\cmd\jev-safety-gateway
+```
+
+三个 `-X` 都是可选的：不注入时版本显示 `dev`，提交号与构建时间回落到 Go 内嵌的 VCS 信息
+（`debug.ReadBuildInfo()`），因此直接 `go build` 也能报出真实提交。`scripts\build-local-test.ps1`
+已自动完成上述注入。Docker 构建上下文不含 `.git`（见 `.dockerignore`），镜像内的构建标识**只能**靠
+`--build-arg VERSION/COMMIT/BUILD_TIME` 传入。
 
 ### 2. 启动
 
 ```powershell
-# 本地把数据库放到项目目录（默认 /data 在 Windows / 无权限环境下写不了）
-$env:JEV_DB_PATH = ".\data\gateway.db"
-.\gateway.exe
+# 数据库默认落在当前工作目录下的 .\data\jev-safety-gateway.db，目录会自动创建，无需额外配置
+.\jev-safety-gateway.exe
+
+# 想换位置再显式指定：
+# $env:JEV_DB_PATH = "D:\somewhere\jev-safety-gateway.db"
 ```
 
 看到下面两行即启动成功：
@@ -192,46 +209,93 @@ curl -i http://localhost:8080/post \
 - **正常内容被拦 / 有害内容放行** → 调「安全阈值」(默认 0.5) 或改「安全判定指令」，分数越接近 1 越安全。
 - **一直 error / fail-open 放行** → 多半是 JEV 密钥无效或网络不通，看网关终端日志 `jev evaluation error`。
 - **想临时全放行** → 关掉「启用过滤」总开关。
+- **忘记管理员口令** → 口令哈希是 `kv` 表里的单行 `admin_hash`。先**停止网关**并备份整个 `data\` 三件套，
+  再只删这一行（`DELETE FROM kv WHERE "key"='admin_hash';`，库内其余配置与日志全部保留），重启后
+  控制台会回到「首次配置」流程，此时 `JEV_ADMIN_PASSWORD` 也会重新生效。**不要用删库来重置口令**——
+  那会连同全部配置与审计日志一起永久丢失。删除前请确认备份副本可读。
 
-## 本地 test 打包（Windows）
+## 本地 test 打包与启动（Windows）
 
-`scripts\build-local-test.ps1` 一条命令完成前端构建、后端构建与打包，产出可整包拷到测试机运行的目录包与 zip。
+`scripts\` 下的仓库脚本只有两个，产物都是同一个测试包目录（默认 `out\jev-safety-gateway\`）加一个 zip，可整包拷到测试机运行：
+
+| 脚本 | 作用 |
+| --- | --- |
+| `start-local-test.ps1` | 构建 + 启动，日常用这个 |
+| `build-local-test.ps1` | 只打包 |
+
+同目录的 `template-start-jev-safety-gateway.ps1` / `template-stop-jev-safety-gateway.ps1` / `template-README.txt` 是**打包模板**：
+打包时被复制进测试包并去掉 `template-` 前缀。它们必须和 `jev-safety-gateway.exe` 同目录才能运行，
+在仓库里直接跑只会报错——那不是构建失败。
+
+### 构建并启动
 
 ```powershell
-.\scripts\build-local-test.ps1                 # 前端 + 后端 → out\local-test\ + zip
-.\scripts\build-local-test.ps1 -SkipFrontend   # 只构建后端（前端沿用仓库已提交产物）
-.\scripts\build-local-test.ps1 -Offline        # 不联网：缺少 web\node_modules 时直接报错
+.\scripts\start-local-test.ps1                        # 前端 + 后端 → 打包 → 启动
+.\scripts\start-local-test.ps1 -SkipFrontend -NoZip    # 只构建后端、不出 zip，再启动（改 Go 代码时最快）
+.\scripts\start-local-test.ps1 -SkipBuild              # 不重新构建，直接重启已有测试包
 ```
 
-也可以直接双击 `scripts\build-local-test.cmd`。
+构建前它会先停掉测试包里正在运行的网关——Windows 上 `jev-safety-gateway.exe` 被占用时 `go build` 无法覆盖它，
+不先停就会构建失败。测试包里已有的 `.env` 默认保留，不会被 `.env.example` 覆盖。
+
+**数据库落在仓库根目录的 `data\jev-safety-gateway.db`**，不是测试包目录：运行态和源码在同一棵树里，好找好备份，
+构建脚本的 `-Clean` 也只清测试包，碰不到它。启动前会打印一行 `数据库：<路径>` 便于核对。想换位置用 `-DbPath`。
+测试包目录里那份 `data\` 只在脱离仓库、直接用包内 `start-jev-safety-gateway.ps1` 启动（拷到测试机单独跑）时才会用到。
+
+> **不要删除仓库 `data\` 下的任何文件**（`jev-safety-gateway.db` 及其 `-wal` / `-shm`）。它不受版本控制、
+> `rm` 不进回收站、本机没有卷影副本——删掉就是永久丢失。注意 `-wal` 可能远大于主库（实测主库 40 KB /
+> WAL 3.4 MB），数据主要落在 WAL 里，**单独留下主库没有意义，三者必须作为一个整体保护**。需要重置配置时
+> 请先停止网关、备份副本，再取得明确同意后操作；忘记管理员口令的正确做法见「常见问题」，而不是删库。
+> （测试包内 `out\<包名>\data\` 是一次性构建产物，`-Clean` 清掉它不受此限。）
 
 | 参数 | 说明 |
 | --- | --- |
-| `-OutputDir <路径>` | 输出目录，默认 `out\local-test`，必须位于仓库内 |
+| `-SkipBuild` | 跳过构建，直接启动已有测试包 |
+| `-OutputDir <路径>` | 测试包目录，默认 `out\jev-safety-gateway` |
+| `-DbPath <路径>` | 数据库路径，默认仓库根目录的 `data\jev-safety-gateway.db`；相对路径按仓库根解析 |
+| `-RefreshEnv` | 用 `.env.example` 覆盖测试包内的 `.env`（重置上游地址与密钥） |
+| `-NoRestart` | 包内已有网关在运行时不再自动停止，直接报错退出 |
+| `-Clean` | 构建前清空测试包目录（包内 `.env` 与 `data\` 一并删除；仓库根目录的 `data\` 不受影响） |
+| `-SkipFrontend` / `-Offline` / `-NoZip` | 透传给 `build-local-test.ps1` |
+| `-ProxyAddr` / `-AdminAddr` | 覆盖监听地址，默认 `:8080` / `:8081` |
+
+### 只打包
+
+```powershell
+.\scripts\build-local-test.ps1                 # 前端 + 后端 → out\jev-safety-gateway\ + zip
+.\scripts\build-local-test.ps1 -SkipFrontend   # 只构建后端（前端沿用仓库已提交产物）
+.\scripts\build-local-test.ps1 -Offline        # 不联网：缺少 web\node_modules 时直接报错
+.\scripts\build-local-test.ps1 -KeepEnv        # 保留测试包里已有的 .env（不被 .env.example 覆盖）
+```
+
+| 参数 | 说明 |
+| --- | --- |
+| `-OutputDir <路径>` | 输出目录，默认 `out\jev-safety-gateway`，必须位于仓库内 |
 | `-SkipFrontend` | 跳过前端构建 |
 | `-SkipBackend` | 跳过后端构建（不能与 `-SkipFrontend` 同时使用） |
 | `-Offline` | 不访问网络，缺少前端依赖时报错退出 |
 | `-NoZip` | 不生成 zip |
 | `-Clean` | 构建前清空输出目录 |
+| `-KeepEnv` | 输出目录已有 `.env` 时保留，不用 `.env.example` 覆盖 |
 
 产物结构：
 
 ```
-out\local-test\
-  gateway.exe        Go 后端二进制，管理控制台前端经 //go:embed 内嵌
+out\jev-safety-gateway\
+  jev-safety-gateway.exe  Go 后端二进制，管理控制台前端经 //go:embed 内嵌
   .env               由 .env.example 生成的初始化配置，需填写上游地址与密钥
-  start-gateway.ps1  启动脚本（读取同目录 .env，数据库默认 data\gateway.db）
-  stop-gateway.ps1   停止脚本（按 gateway.pid 或进程路径匹配停止）
+  start-jev-safety-gateway.ps1  启动脚本（读取同目录 .env，数据库默认 data\jev-safety-gateway.db）
+  stop-jev-safety-gateway.ps1   停止脚本（按 jev-safety-gateway.pid 或进程路径匹配停止）
   README.txt         包内使用说明（含构建时间、提交号与前端状态）
-out\jev-gateway-local-test-<日期>-<短提交>.zip
+out\jev-safety-gateway-<日期>-<短提交>.zip
 ```
 
-在测试机上：解压 → 编辑 `.env` → 运行 `.\start-gateway.ps1` → 浏览器打开 `http://127.0.0.1:8081` 完成首次配置。
+在测试机上：解压 → 编辑 `.env` → 运行 `.\start-jev-safety-gateway.ps1` → 浏览器打开 `http://127.0.0.1:8081` 完成首次配置。
 
 ## 项目结构
 
 ```
-cmd/gateway/main.go        入口、环境变量初始化
+cmd/jev-safety-gateway/    入口、环境变量初始化
 internal/config/           SQLite 存储：设置、密钥、日志、统计
 internal/extract/          按 API 路径提取用户输入
 internal/jev/              JEV 评估客户端（多密钥轮询 + 重试）
@@ -242,6 +306,7 @@ web/                       管理控制台前端工程（Vue 3 + Vite + TS + Tai
   src/                       源码（路由、模块、组件、接口封装）
   dist/                      构建产物，随源码入库并经 //go:embed 内嵌
 nginx/gateway.conf         nginx 反代示例
+scripts/                   Windows 本地 test 打包与启动（见「本地 test 打包与启动」）
 Dockerfile, docker-compose.yml
 ```
 
@@ -249,4 +314,8 @@ Dockerfile, docker-compose.yml
 
 - 管理控制台（`:8081`）默认仅绑定本机。生产环境请置于内网，或在 nginx 层叠加 IP 白名单 / TLS / basic auth。
 - 网关本身不校验客户端 apikey；对客户端的鉴权仍由上游（new-api 等）负责。网关只做内容安全过滤。
-- JEV 密钥、管理员口令哈希保存在 SQLite（Docker volume `jev-data`），请妥善保管该卷。
+- JEV 密钥、管理员口令哈希保存在 SQLite（Docker volume `jev-safety-gateway-data`），请妥善保管该卷。
+- **`GET /api/version` 是唯一免鉴权的 `/api/` 路由**：登录页需要在拿到 token 之前显示版本号与守护进程地址。
+  它只返回构建标识（版本、短提交号、构建时间、Go 版本）与实际绑定的监听地址，不含任何审计数据；
+  审计日志派生的延迟分位在受保护的 `GET /api/stats/latency` 下。若这条公开面不可接受，
+  请把管理口限制在内网——不要靠给它加 token 来收紧，那会让登录页退回降级态。

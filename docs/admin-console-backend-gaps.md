@@ -6,10 +6,12 @@
 **范围**：以「只设计、不实施」为基线——不新增 `/api/*` 路径、不改 `logs` / `jev_keys` 表结构、不改 `internal/proxy` 埋点。
 界面侧对每一项都已落实「明确标注的降级态」，不显示任何无来源数值。
 
-**本次实际实施的后端改动只有两处**（Shape 阶段确认的 Q11/Q12/Q13，细节见「本次已实施的后端改动」一节）：
+**截至目前实际实施的后端改动有三处**（前两处为 Shape 阶段确认的 Q11/Q12/Q13，第三处为后续补做的 G23/G2，
+细节见「本次已实施的后端改动」一节）：
 
 1. `GET /api/stats` 在**既有路径**上扩展响应，新增逐桶时间序列与风险分值直方图（驾驶舱两张图的唯一数据来源，`internal/config` 只读聚合 + `internal/admin` 响应组装）；
-2. `internal/admin` 的静态资源改为 SPA 回落（history 路由的深链接可直接打开）。
+2. `internal/admin` 的静态资源改为 SPA 回落（history 路由的深链接可直接打开）；
+3. 新增 `GET /api/version`（免鉴权，构建身份 + 实际绑定的监听地址）与 `GET /api/stats/latency`（鉴权，窗口内延迟分位数）。
 
 除此之外，本文档的其余条目仍是**方案设计**，未实施。
 
@@ -24,8 +26,10 @@
 | `/api/keys/{id}` | DELETE | 删除单把密钥 |
 | `/api/logs` | GET | `{items, total}`，参数 `limit/offset/decision/model/q/since` |
 | `/api/stats` | GET | `{total, allowed, blocked, skipped, errors}` + 本次新增 `{bucket_seconds, series[], score_buckets[], unscored}`，参数 `hours` |
+| `/api/stats/latency` | GET | `{count, sampled, p50, p90, p95, p99, avg, min, max}`，参数 `hours`（默认 24，上限 720） |
+| `/api/version` | GET | `{version, commit, built_at, go, proxy_addr, admin_addr}`，**免鉴权** |
 
-`logs` 表列：`id, ts, method, path, kind, decision, score, model, latency_ms, ip, reason, snippet`（索引 `idx_logs_ts(ts DESC)`）。
+`logs` 表列：`id, ts, method, path, kind, decision, score, model, latency_ms, ip, reason, snippet`（索引 `idx_logs_ts(ts DESC)`、`idx_logs_ts_latency(ts DESC, latency_ms)`）。
 `jev_keys` 表列：`id, label, key, enabled, calls, last_used, created_at`。
 
 ## 结论摘要
@@ -57,12 +61,14 @@
 | G23 | 版本 / 构建信息 | 壳层 | B 只读（编译期注入） | 高 |
 
 > **本次状态**：G1 的「逐桶时间序列」与 G4 在驾驶舱的原始形态已被 Q11/Q12 的两项聚合取代并**已实施**
-> （见下一节），因此驾驶舱的趋势图与分布图不再是降级态；G1 中仍未做的部分（逐桶的 `skipped`/`errors` 细分、
-> 独立 `/api/stats/timeseries` 路径）与其余条目一样保持「设计未实施」。G2、G3、G5…G23 的降级态均未变化。
+> （见下一节），因此驾驶舱的趋势图与分布图不再是降级态。**另一项已实施的改动是 G23 版本 / 构建信息与
+> G2 延迟分位数**（见「本次已实施」一节的补充条目），登录页与驾驶舱相应徽章不再是降级态；
+> G1 中仍未做的部分（逐桶的 `skipped`/`errors` 细分、独立 `/api/stats/timeseries` 路径）
+> 与其余条目一样保持「设计未实施」，G3、G5…G22 的降级态均未变化。
 
 ---
 
-## 本次已实施的后端改动（Q11 / Q12 / Q13）
+## 本次已实施的后端改动（Q11 / Q12 / Q13 + G23 / G2）
 
 三处改动都不新增 `/api/*` 路径、不改表结构、不触碰 `internal/proxy`，因此不改变放行/拦截/跳过/错误的判定语义、
 `X-JEV-Gateway` / `X-JEV-Score` 响应头与 SSE 流式透传。
@@ -101,6 +107,22 @@
 - **边界**：只影响管理口静态资源投递，不改变任何 `/api/*` 的鉴权与响应；代理口（`:8080`）完全不涉及。
 - **侵入范围**：仅 `internal/admin`。
 
+### 补充：G23 版本 / 构建信息 + G2 延迟分位数
+
+上面两处是 Shape 阶段确认的范围内改动。后续补做的两处只读能力在此记录（设计细节见 B 类对应条目）：
+
+- **`GET /api/version`（新路径，免鉴权）**——构建身份 + **实际绑定**的监听地址。免鉴权是刻意的：
+  登录页需要在任何 token 存在之前渲染构建徽章。正因如此，该路由**不得**携带任何派生自审计日志的字段。
+  应用构建标识的注入点与 Docker 的处理见 G23 条目。
+- **`GET /api/stats/latency`（新路径，需鉴权）**——窗口内 `latency_ms` 的 `count/sampled/p50/p90/p95/p99/avg/min/max`。
+  延迟分布派生自审计日志，会泄露请求量级与时序，因此留在鉴权之后。取样按 `ORDER BY ts DESC`（按时间均匀），
+  超过 20000 行时标注 `sampled:true`；分位数用 nearest-rank，取值必然是真实出现过的样本。
+- **`server.Run` 改为显式监听**：`net.Listen` 后再 `Serve`，把内核实际分配的地址回填进 `admin.Info`，
+  这样 `:8080` 上报的是真实 host:port，端口写 `0` 也能报出分配结果。只影响监听方式，不影响路由与判定语义。
+- **共同边界**：两者都只读，不新增表、不写库、不触碰 `internal/proxy`，因此不改变放行/拦截/跳过/错误的判定语义、
+  `X-JEV-Gateway` / `X-JEV-Score` 响应头与 SSE 流式透传。
+- **侵入范围**：`internal/config`、`internal/admin`、`internal/server`、`cmd/jev-safety-gateway`、`Dockerfile`、`web/src`。
+
 ---
 
 ## B 类：只读聚合接口（无库表变更，纯查询）
@@ -123,14 +145,21 @@
 
 ### G2 延迟分位数
 
-- **界面元素**：驾驶舱「P99 检定延迟」卡片；审计视图 KPI 条「平均网关耗时 P95」。
-- **现状态**：`logs.latency_ms` 逐行存在，但没有分位数聚合。
-- **建议接口**：`GET /api/stats/latency?hours=24` → `{"count":1260,"p50":41,"p90":88,"p95":132,"p99":310,"avg":57}`
-- **库表/模型变更**：无表变更；建议补索引 `CREATE INDEX IF NOT EXISTS idx_logs_ts_latency ON logs(ts DESC, latency_ms)` 以支撑区间扫描。
-- **采集点**：无。
-- **查询草案**：取区间内 `latency_ms` 排序值定位分位（`SELECT latency_ms FROM logs WHERE ts >= ? ORDER BY latency_ms`，Go 侧取下标；样本量巨大时改用近似分位或按 `LIMIT` 采样并在响应中标注 `sampled:true`）。
-- **降级策略（已落地）**：卡片显示「未接入」徽章，不显示任何延迟数值。
-- **侵入范围**：仅 `internal/config`、`internal/admin`。
+- **界面元素**：驾驶舱「P99 网关耗时」卡片（原型写作「P99 检定延迟」，见下方口径说明）。
+- **现状态（已实施）**：`GET /api/stats/latency?hours=` 已落地，返回
+  `{count,sampled,p50,p90,p95,p99,avg,min,max}`；驾驶舱卡片显示 P99，副行给出 P50/P95 与样本量。
+- **口径说明**：`logs.latency_ms` 记的是**整条请求**（检定 + 转发）的总耗时，未拆分阶段
+  （前端审计页的「只记录单次总耗时，未拆分检定与转发阶段」降级态仍然成立）。因此卡片标题用
+  「网关耗时」而不是「检定延迟」——与实际口径一致，也与审计页的「网关耗时」标签对齐。
+  若要真的按阶段拆分，属 G9 那一类主链路埋点，不在本条范围内。
+- **实现要点**：
+  - 索引 `idx_logs_ts_latency ON logs(ts DESC, latency_ms)` 已随 `migrate()` 建立。
+  - 取样按 `ORDER BY ts DESC LIMIT 20000`（**按时间**均匀），超出上限时响应标注 `sampled:true`，
+    卡片底注如实写明是近似值。切勿改成 `ORDER BY latency_ms LIMIT n`：那样留下的全是窗口内最快的
+    记录，每个分位数都会被系统性压低（`internal/config/stats_test.go` 有专门的回归测试钉住这一点）。
+  - 分位数用 nearest-rank 定义，取值必然落在真实出现过的样本上。
+  - 端点**需要鉴权**：延迟分位派生自审计日志，会泄露请求量级与时序。
+- **侵入范围**：`internal/config`、`internal/admin`、`web/src/modules/dashboard`。
 
 ### G16 分发池负载
 
@@ -145,14 +174,24 @@
 
 ### G23 版本 / 构建信息
 
-- **界面元素**：壳层底部（原型为 `Engine Core v2.4.1-rc`）、驾驶舱横幅版本徽章。
-- **现状态**：二进制没有版本号，前端已改为展示真实可取的信息（检定模型、管理口地址）。
-- **建议接口**：`GET /api/version` → `{"version":"v2.4.1","commit":"5335b40","built_at":"2026-09-23T07:00:00Z","go":"go1.23"}`
-  - 或直接并入 `/api/state`，避免多一次请求。
-- **库表/模型变更**：无；`cmd/gateway` 增加 `var version/commit/buildTime string`，用 `-ldflags "-X main.version=..."` 在构建期注入（缺省 `dev`）。
-- **采集点**：无。
-- **降级策略（已落地）**：壳层不显示任何版本字符串，只显示真实存在的检定模型与管理口标识；原型里的 `Apple HIG Spec` 一类宣传文案已移除。
-- **侵入范围**：`cmd/gateway`、`internal/admin`、`Dockerfile`（构建参数）。
+- **界面元素**：壳层底部（原型为 `Engine Core v2.4.1-rc`）、登录页脚徽章、驾驶舱横幅版本徽章。
+- **现状态（已实施）**：`GET /api/version` 已落地，返回
+  `{version,commit,built_at,go,proxy_addr,admin_addr}`；构建期由 ldflags 注入。
+- **实现要点**：
+  - `cmd/jev-safety-gateway/version.go` 声明 `version/commit/buildTime` 三个 `-X` 注入点，缺省 `dev`；
+    `buildInfo()` 里 ldflags 优先，为空时回落 `debug.ReadBuildInfo()` 的 `vcs.revision` / `vcs.time`，
+    所以 `go build` 直出的本地二进制也能报出真实 commit。Docker 构建上下文里没有 `.git`
+    （见 `.dockerignore`），镜像内只能靠 ldflags——`Dockerfile` 已加 `VERSION`/`COMMIT`/`BUILD_TIME`
+    三个 build-arg 并从 CI / compose 传入。
+  - `proxy_addr` / `admin_addr` 是**实际绑定的地址**，不是配置里的字符串：监听端口传 `:8080`
+    时它给出真实的 `host:port`；端口写 `0` 时也照样能报出内核分配的端口。为此 `server.Run`
+    先 `net.Listen` 再 `Serve`，并把绑定结果回填给 `admin.Info`（`main.go` 里该值按指针传入，
+    生命周期要跨过这次调用）。
+  - **`/api/version` 是唯一免鉴权的 `/api/` 路由**（登录页在任何 token 之前就要渲染构建标识）。
+    它只承载构建身份与监听地址，**不得**掺入任何派生自审计日志的信息——延迟分位这类派生数据
+    必须留在鉴权后的 `/api/stats/latency`。这是刻意的最小暴露面，不要因为「顺手多带几个字段」而破坏。
+    真要收紧，方向是限制管理口的网络可达性，而不是给免鉴权路由加 token。
+- **侵入范围**：`cmd/jev-safety-gateway`、`internal/admin`、`internal/server`、`Dockerfile`、`web/src`。
 
 ---
 
@@ -379,12 +418,17 @@
 ## 实施建议顺序
 
 1. **已完成**：G1 的逐桶时间序列、G4 的驾驶舱形态（由风险分值直方图替代）——两项都只动 `internal/config` + `internal/admin`，
-   已随本次 change 交付。
-2. **第一批（纯只读，零主链路侵入）**：G23 版本、G2 延迟分位、G11 导出 CSV，
-   以及 G1 剩余的分桶细分。这批同样只动 `internal/config` + `internal/admin`，界面可再去掉 2 处降级态。
-3. **第二批（主链路轻量埋点）**：G3、G6、G7（+ 响应头兼容性评估）。
-4. **第三批（需要上游配合或独立立项）**：G4（分类来源决策）、G5、G14、G17、G18、G19。
-5. **不纳入**：G8（建议不补）、G13（改为重检）、G15、G20、G21、G22；G9 仅在合规确需时以本地 mmdb 方案评估。
+   已随上一 change 交付。
+2. **已完成（本次）**：G23 版本 / 构建信息、G2 延迟分位数。两项都只动 `internal/config` + `internal/admin`
+   （G23 另加 `internal/server` / `Dockerfile` / `cmd`），零主链路侵入，未触碰 `internal/proxy` 的判定语义。
+   至此登录页与驾驶舱的「版本未接入」「延迟未接入」两处降级态已消除；「地址」原本就是真实值，
+   现在改为报告**实际绑定的**监听地址（`Run` 先 `net.Listen` 后回填），不再只是回显配置字符串。
+3. **第一批剩余（纯只读，零主链路侵入）**：G11 导出 CSV，以及 G1 剩余的分桶细分
+   （逐桶 `skipped`/`errors`、独立 `/api/stats/timeseries`）。同样只动 `internal/config` + `internal/admin`。
+4. **第二批（主链路轻量埋点）**：G3、G6、G7（+ 响应头兼容性评估）。
+5. **第三批（需要上游配合或独立立项）**：G4（分类来源决策）、G5、G14、G17、G18、G19。
+6. **不纳入**：G8（建议不补）、G13（改为重检）、G15、G20、G21、G22；G9 仅在合规确需时以本地 mmdb 方案评估。
+
 
 每一批落地后，前端只需替换对应位置的降级组件为真实组件；`web/src/components/NotConnected.vue` 的 `reason`
 文本与本文的「降级策略」行一一对应，可作为验收清单核对。

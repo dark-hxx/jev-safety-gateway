@@ -10,7 +10,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"jev-gateway/internal/config"
+	"jev-safety-gateway/internal/config"
 )
 
 // testFS 是一个最小的控制台构建产物：入口页 + 一个带 hash 的资源目录。
@@ -23,7 +23,7 @@ func testFS() fstest.MapFS {
 
 func newTestHandler(t *testing.T) (*Handler, *config.Store) {
 	t.Helper()
-	store, err := config.Open(filepath.Join(t.TempDir(), "gateway.db"))
+	store, err := config.Open(filepath.Join(t.TempDir(), "jev-safety-gateway.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -31,7 +31,7 @@ func newTestHandler(t *testing.T) (*Handler, *config.Store) {
 	if err := store.SetAdminPasswordPlain("secret123"); err != nil {
 		t.Fatalf("set admin password: %v", err)
 	}
-	return New(store, testFS()), store
+	return New(store, testFS(), nil), store
 }
 
 // 登录一次，返回可用的 bearer token。

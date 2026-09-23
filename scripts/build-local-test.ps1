@@ -5,10 +5,10 @@
 
 .DESCRIPTION
     一条命令完成：环境预检 → 前端构建（npm） → 后端构建（go） → 组装测试包 → 压缩 zip。
-    默认输出到 out\local-test\，并生成带日期与短提交号的 zip。
+    默认输出到 out\jev-safety-gateway\，并生成带日期与短提交号的 zip。
 
 .PARAMETER OutputDir
-    测试包输出目录，默认 out\local-test（必须位于仓库目录内）。
+    测试包输出目录，默认 out\jev-safety-gateway（必须位于仓库目录内）。
 
 .PARAMETER SkipFrontend
     跳过前端构建，只构建后端。
@@ -24,15 +24,20 @@
 
 .PARAMETER Clean
     构建前清空输出目录。
+
+.PARAMETER KeepEnv
+    输出目录里已有 .env 时保留它，不用仓库根目录的 .env.example 覆盖。
+    「反复构建 + 启动」的本地循环建议加上，否则每次构建都会把填好的上游地址与密钥重置掉。
 #>
 [CmdletBinding()]
 param(
-    [string]$OutputDir = 'out\local-test',
+    [string]$OutputDir = 'out\jev-safety-gateway',
     [switch]$SkipFrontend,
     [switch]$SkipBackend,
     [switch]$Offline,
     [switch]$NoZip,
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$KeepEnv
 )
 
 Set-StrictMode -Version Latest
@@ -48,8 +53,7 @@ function Stop-WithError { param([string]$Message) Write-Host "错误：$Message"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $webDir = Join-Path $repoRoot 'web'
-$packageScriptDir = Join-Path $PSScriptRoot 'local-test'
-$exeName = 'gateway.exe'
+$exeName = 'jev-safety-gateway.exe'
 
 $repoRootFull = [System.IO.Path]::GetFullPath($repoRoot)
 $pkgDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) {
@@ -131,12 +135,37 @@ if ($Clean -and (Test-Path -LiteralPath $pkgDir)) {
 }
 New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
 
+# ---------- 构建标识 ----------
+# 这一组值同时供两处使用：go build 的 -ldflags（GET /api/version 会报给控制台）
+# 和 README.txt 的占位替换。所以只在这里取一次，避免两边算出不同的结果。
+$commit = 'nogit'
+try {
+    $commitOutput = & git -C $repoRoot rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $commitOutput) {
+        $commit = ([string]($commitOutput | Select-Object -First 1)).Trim()
+    }
+} catch { }
+
+$version = 'dev'
+if (Test-Path -LiteralPath $frontendManifest) {
+    # 必须显式 -Encoding UTF8：package.json 无 BOM 且含中文描述，PowerShell 5.1 会按
+    # 本地代码页解码，ConvertFrom-Json 随即报错，version 静默退回 'dev'。
+    try { $version = (Get-Content -LiteralPath $frontendManifest -Raw -Encoding UTF8 | ConvertFrom-Json).version } catch { }
+}
+if (-not $version) { $version = 'dev' }
+# 无 git 时不留 "nogit" 字样给控制台，留空即可，前端会只显示版本号。
+$buildCommit = if ($commit -eq 'nogit') { '' } else { $commit }
+$buildTimeISO = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+
 $exePath = Join-Path $pkgDir $exeName
 if (-not $SkipBackend) {
     Write-Step '构建后端（go build）'
     Push-Location -LiteralPath $repoRoot
     try {
-        & go build -trimpath -ldflags '-s -w' -o $exePath ./cmd/gateway
+        # -s -w 去掉符号表；-X 注入上面的构建标识。
+        $ldflags = "-s -w -X main.version=$version -X main.commit=$buildCommit -X main.buildTime=$buildTimeISO"
+        $goArgs = @('build', '-trimpath', "-ldflags=$ldflags", '-o', $exePath, './cmd/jev-safety-gateway')
+        & go @goArgs
         if ($LASTEXITCODE -ne 0) {
             Stop-WithError "go build 失败（退出码 $LASTEXITCODE）。依赖未就绪时可先执行 go mod tidy。"
         }
@@ -146,7 +175,7 @@ if (-not $SkipBackend) {
     if (-not (Test-Path -LiteralPath $exePath)) {
         Stop-WithError "go build 未产出 $exePath。"
     }
-    Write-Info "后端构建完成：$exePath"
+    Write-Info "后端构建完成：$exePath（版本 $version，提交 $buildCommit）"
 } elseif (-not (Test-Path -LiteralPath $exePath)) {
     Write-Notice "已指定 -SkipBackend，但输出目录中没有现成的 $exeName；测试包将不包含可执行文件。"
 }
@@ -156,9 +185,19 @@ Write-Step "组装测试包：$pkgDir"
 
 $envTemplate = Join-Path $repoRoot '.env.example'
 $envTarget = Join-Path $pkgDir '.env'
-if (Test-Path -LiteralPath $envTemplate) {
+$envExists = Test-Path -LiteralPath $envTarget
+
+if ($KeepEnv -and $envExists) {
+    Write-Info '.env 已存在，按 -KeepEnv 保留原有配置（未用 .env.example 覆盖）。'
+} elseif (Test-Path -LiteralPath $envTemplate) {
     Copy-Item -LiteralPath $envTemplate -Destination $envTarget -Force
-    Write-Info '.env 已由 .env.example 生成，请填入真实上游地址与密钥。'
+    if ($envExists) {
+        Write-Notice '.env 已被 .env.example 覆盖（要保留原配置请加 -KeepEnv），请核对上游地址与密钥。'
+    } else {
+        Write-Info '.env 已由 .env.example 生成，请填入真实上游地址与密钥。'
+    }
+} elseif ($envExists) {
+    Write-Notice '.env 已存在但仓库中没有 .env.example，保留原文件。'
 } else {
     Set-Content -LiteralPath $envTarget -Encoding UTF8 -Value @(
         '# 首次启动的一次性初始化变量',
@@ -170,30 +209,23 @@ if (Test-Path -LiteralPath $envTemplate) {
     Write-Notice '未找到 .env.example，已生成空白 .env 模板。'
 }
 
-$startScriptSource = Join-Path $packageScriptDir 'start-gateway.ps1'
-$stopScriptSource = Join-Path $packageScriptDir 'stop-gateway.ps1'
-$readmeSource = Join-Path $packageScriptDir 'README.txt'
-foreach ($required in @($startScriptSource, $stopScriptSource, $readmeSource)) {
-    if (-not (Test-Path -LiteralPath $required)) {
-        Stop-WithError "打包模板缺失：$required"
+# template-*.ps1 / template-README.txt 是测试包内脚本的模板：复制进测试包并去掉 template- 前缀。
+# 它们必须和 jev-safety-gateway.exe 同目录才能运行，在仓库里直接跑没有意义。
+$packageTemplates = @(
+    @{ Source = (Join-Path $PSScriptRoot 'template-start-jev-safety-gateway.ps1'); Target = 'start-jev-safety-gateway.ps1' }
+    @{ Source = (Join-Path $PSScriptRoot 'template-stop-jev-safety-gateway.ps1'); Target = 'stop-jev-safety-gateway.ps1' }
+    @{ Source = (Join-Path $PSScriptRoot 'template-README.txt'); Target = 'README.txt' }
+)
+foreach ($template in $packageTemplates) {
+    if (-not (Test-Path -LiteralPath $template.Source)) {
+        Stop-WithError "打包模板缺失：$($template.Source)"
     }
+    Copy-Item -LiteralPath $template.Source -Destination (Join-Path $pkgDir $template.Target) -Force
 }
-Copy-Item -LiteralPath $startScriptSource -Destination $pkgDir -Force
-Copy-Item -LiteralPath $stopScriptSource -Destination $pkgDir -Force
+$readmeSource = Join-Path $PSScriptRoot 'template-README.txt'
 
-$commit = 'nogit'
-try {
-    $commitOutput = & git -C $repoRoot rev-parse --short HEAD 2>$null
-    if ($LASTEXITCODE -eq 0 -and $commitOutput) {
-        $commit = ([string]($commitOutput | Select-Object -First 1)).Trim()
-    }
-} catch { }
-
-$version = 'dev'
-if (Test-Path -LiteralPath $frontendManifest) {
-    try { $version = (Get-Content -LiteralPath $frontendManifest -Raw | ConvertFrom-Json).version } catch { }
-}
-if (-not $version) { $version = 'dev' }
+# $commit / $version 在打包开始时已取过一次（见「构建标识」），README 与二进制
+# 用同一组值，这里不再重复计算。
 
 if ($frontendBuilt) {
     $frontendState = '本次打包已重新构建（npm run build）'
@@ -215,7 +247,7 @@ Set-Content -LiteralPath (Join-Path $pkgDir 'README.txt') -Value $readmeText -En
 $zipPath = $null
 if (-not $NoZip) {
     $dateTag = Get-Date -Format 'yyyyMMdd'
-    $zipPath = Join-Path $outRoot "jev-gateway-local-test-$dateTag-$commit.zip"
+    $zipPath = Join-Path $outRoot "jev-safety-gateway-$dateTag-$commit.zip"
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     Write-Step "压缩测试包：$zipPath"
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -227,5 +259,9 @@ Write-Host '打包完成。' -ForegroundColor Green
 Write-Host "  测试包目录：$pkgDir"
 if ($zipPath) { Write-Host "  压缩包：    $zipPath" }
 Write-Host ''
-Write-Host '在测试机上：解压 → 填写 .env → 运行 .\start-gateway.ps1，浏览器打开 http://127.0.0.1:8081'
+Write-Host '本机启动（脚本必须和 jev-safety-gateway.exe 同目录，即测试包目录）：'
+Write-Host "  $pkgDir\start-jev-safety-gateway.ps1"
+Write-Host '构建并直接启动（会自动停掉包内旧进程，并保留已有 .env）：'
+Write-Host '  .\scripts\start-local-test.ps1'
+Write-Host '在测试机上：解压 → 填写 .env → 运行 .\start-jev-safety-gateway.ps1，浏览器打开 http://127.0.0.1:8081'
 exit 0

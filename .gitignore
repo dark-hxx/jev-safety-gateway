@@ -1,9 +1,13 @@
 # 构建产物
+/jev-safety-gateway
+/jev-safety-gateway.exe
+# Windows 上覆盖正在运行的二进制时留下的备份（jev-safety-gateway.exe~）
+/jev-safety-gateway.exe~
+/out/
+# 改名前的旧二进制名，避免历史残留被误提交
 /gateway
 /gateway.exe
-# Windows 上覆盖正在运行的二进制时留下的备份（gateway.exe~）
 /gateway.exe~
-/out/
 
 # 本地数据 / 数据库
 /data/

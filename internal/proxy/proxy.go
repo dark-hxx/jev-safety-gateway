@@ -17,12 +17,12 @@ import (
 	"strings"
 	"time"
 
-	"jev-gateway/internal/abuse"
-	"jev-gateway/internal/config"
-	"jev-gateway/internal/extract"
-	"jev-gateway/internal/jev"
-	"jev-gateway/internal/logx"
-	"jev-gateway/internal/scorecache"
+	"jev-safety-gateway/internal/abuse"
+	"jev-safety-gateway/internal/config"
+	"jev-safety-gateway/internal/extract"
+	"jev-safety-gateway/internal/jev"
+	"jev-safety-gateway/internal/logx"
+	"jev-safety-gateway/internal/scorecache"
 )
 
 // Handler is the filtering reverse proxy HTTP handler.

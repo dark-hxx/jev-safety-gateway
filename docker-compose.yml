@@ -1,8 +1,8 @@
 services:
-  jev-gateway:
+  jev-safety-gateway:
     build: .
-    image: jev-gateway:latest
-    container_name: jev-gateway
+    image: jev-safety-gateway:latest
+    container_name: jev-safety-gateway
     restart: unless-stopped
     ports:
       - "8080:8080"   # 过滤代理 (nginx 转发到这里)
@@ -14,7 +14,7 @@ services:
       JEV_API_KEY: "${JEV_API_KEY:-}"                # 初始 JEV 密钥 (可选)
       JEV_ADMIN_PASSWORD: "${JEV_ADMIN_PASSWORD:-}"  # 初始管理员口令 (可选)
     volumes:
-      - jev-data:/data
+      - jev-safety-gateway-data:/data
     # 若 newapi 也在本 compose 中, 可用 depends_on 并以服务名互联:
     # depends_on:
     #   - newapi
@@ -27,7 +27,7 @@ services:
   #   volumes:
   #     - ./nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
   #   depends_on:
-  #     - jev-gateway
+  #     - jev-safety-gateway
 
 volumes:
-  jev-data:
+  jev-safety-gateway-data:

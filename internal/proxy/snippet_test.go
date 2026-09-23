@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"jev-gateway/internal/config"
-	"jev-gateway/internal/jev"
-	"jev-gateway/internal/logx"
+	"jev-safety-gateway/internal/config"
+	"jev-safety-gateway/internal/jev"
+	"jev-safety-gateway/internal/logx"
 )
 
 // This file covers the two operator-facing switches that sit on top of the safety
@@ -40,7 +40,7 @@ func (staticKeys) MarkKeyUsed(int64) {}
 // rows the handler wrote.
 func newAuditHandler(t *testing.T, set config.Settings) (*Handler, *config.Store) {
 	t.Helper()
-	store, err := config.Open(filepath.Join(t.TempDir(), "gateway.db"))
+	store, err := config.Open(filepath.Join(t.TempDir(), "jev-safety-gateway.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

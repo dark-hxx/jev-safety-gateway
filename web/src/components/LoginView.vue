@@ -13,10 +13,13 @@ import * as api from '../api'
  *
  * 与后端事实冲突的元素按「分类处理」口径处理（见 docs/admin-console-backend-gaps.md）：
  * - `ZERO-TRUST TLS`、`PII SHIELD ACTIVE` 是静态标语，原样保留；
- * - 版本徽标（原型 `v2.4.1-rc3`）、延迟徽标（原型 `LATENCY <1.8ms`）、
- *   守护进程地址胶囊（原型 `127.0.0.1:8080`）没有接口来源，改以「未接入」降级态呈现，
- *   不显示任何伪造数值；
- * - 口令哈希元信息标注为后端真实使用的 bcrypt；
+ * - 版本徽标（原型 `v2.4.1-rc3`）、守护进程地址胶囊（原型 `127.0.0.1:8080`）改为读取
+ *   免鉴权的 `GET /api/version`（缺口 G23 与地址暴露）；接口不可用时仍退回「未接入」
+ *   降级态，不显示任何伪造数值；
+ * - 延迟徽标（原型 `LATENCY <1.8ms`）显示**本次到网关的往返耗时**，由客户端自己测量。
+ *   鉴权前拿不到审计日志派生的延迟分位（那属于受保护数据，见控制台驾驶舱），
+ *   而这个往返耗时是登录页唯一能给出的真实延迟，且不泄露服务端遥测；
+ * - 不标注口令哈希算法（原型为 SHA-256，曾改为 bcrypt，现按要求整体移除）；
  * - 不呈现「保持本工作站受信任凭据 (24h)」勾选项，也不提供语言切换。
  *
  * 登录与初始设置的行为与既有接口语义保持一致：`GET /api/setup-status` 决定模式、
@@ -58,8 +61,42 @@ const subtitle = 'AI Request Security & Filtering Gateway'
 const statusText = computed(() =>
   setupMode.value ? '首次使用：请设置管理员口令（至少 6 位）' : '输入管理员口令以访问控制台',
 )
-/** 口令哈希元信息：后端使用 bcrypt（见 internal/admin/auth.go），不是原型标注的 SHA-256。 */
-const passMeta = computed(() => (setupMode.value ? 'bcrypt · 至少 6 位' : 'bcrypt'))
+/** 右侧元信息：仅保留初始配置时的口令长度约束，不标注哈希算法。 */
+const passMeta = computed(() => (setupMode.value ? '至少 6 位' : ''))
+
+/**
+ * 系统信息：构建标识与监听地址来自免鉴权的 `GET /api/version`，往返耗时由本次请求
+ * 在客户端实测。
+ *
+ * 三者任一拿不到就保持 null，模板回退到「未接入」降级态——后端还是旧版本时，
+ * 登录页照常可用，不会白屏也不会显示编造的数值。
+ */
+const versionInfo = ref<api.VersionInfo | null>(null)
+const rttMs = ref<number | null>(null)
+
+/** 版本徽标文本：`v2.0.0`，有短提交号时追加 `+7a4ffcb`。 */
+const versionText = computed(() => {
+  const v = versionInfo.value
+  if (!v?.version) return ''
+  return `v${v.version}${v.commit ? '+' + v.commit : ''}`
+})
+
+/** 守护进程地址：原型那枚胶囊里的 127.0.0.1:8080 是**代理口**，所以取 proxy_addr。 */
+const proxyAddr = computed(() => versionInfo.value?.proxy_addr ?? '')
+
+const latencyText = computed(() => (rttMs.value === null ? '' : `${rttMs.value} ms`))
+
+onMounted(async () => {
+  const started = performance.now()
+  try {
+    versionInfo.value = await api.getVersion()
+    // 只在请求成功时记录耗时：失败等待时间不是「到网关的延迟」。
+    rttMs.value = Math.max(1, Math.round(performance.now() - started))
+  } catch {
+    versionInfo.value = null
+    rttMs.value = null
+  }
+})
 
 async function submit(): Promise<void> {
   const password = pw.value
@@ -105,10 +142,12 @@ async function onPwEnter(): Promise<void> {
       <div class="w-full max-w-[440px] flex items-center justify-between gap-space-sm mb-space-lg px-space-xs z-10">
         <div class="flex items-center gap-space-xs text-on-surface-variant min-w-0">
           <Icon name="verified-user" class="text-[18px] shrink-0" />
-          <!-- 原型此处为硬编码版本号 v2.4.1-rc3；后端无版本接口，降级呈现 -->
+          <!-- 构建标识来自免鉴权的 /api/version；接口不可用时回退降级态 -->
+          <span v-if="versionText" class="font-code-badge text-code-badge tracking-tight">{{ versionText }}</span>
           <NotConnected
+            v-else
             title="版本未接入"
-            reason="后端没有版本/构建信息接口（缺口 G23），控制台无法读取自身版本号。"
+            reason="未能从 GET /api/version 读取构建信息，控制台无法显示自身版本号。"
           />
         </div>
 
@@ -180,7 +219,7 @@ async function onPwEnter(): Promise<void> {
               <label class="font-caption-1 text-caption-1 text-on-surface-variant font-medium" for="adminPass">
                 管理员主口令
               </label>
-              <span class="font-code-badge text-code-badge text-on-surface-variant/70">{{ passMeta }}</span>
+              <span v-if="passMeta" class="font-code-badge text-code-badge text-on-surface-variant/70">{{ passMeta }}</span>
             </div>
             <div
               class="relative flex items-center bg-surface-container-high rounded-lg transition-all focus-within:bg-surface-container-highest shadow-inner"
@@ -256,25 +295,27 @@ async function onPwEnter(): Promise<void> {
           </button>
         </form>
 
-        <!-- 守护进程状态胶囊：地址与延迟都没有接口来源，此处只呈现可达性事实 -->
+        <!-- 守护进程状态胶囊：地址来自 /api/version，呈现实际绑定的代理口 -->
         <div class="w-full mt-space-lg pt-space-md flex flex-col items-center gap-space-xs">
           <div class="flex items-center gap-2 px-space-md py-1 rounded-full bg-surface-container-high/90 text-on-surface shadow-sm">
             <span class="w-2 h-2 rounded-full bg-secondary animate-pulse shrink-0"></span>
             <span class="font-code-badge text-code-badge tracking-tight text-on-surface-variant">
               管理服务已连接
             </span>
-            <!-- 原型此处为硬编码守护进程地址 127.0.0.1:8080，无接口来源，降级呈现 -->
+            <span v-if="proxyAddr" class="font-code-badge text-code-badge tracking-tight text-outline">{{ proxyAddr }}</span>
             <NotConnected
+              v-else
               title="地址未接入"
-              reason="后端没有暴露守护进程监听地址或运行位置的接口，且管理口默认只监听 127.0.0.1。"
+              reason="未能从 GET /api/version 读取监听地址。"
             />
           </div>
 
-          <!-- 安全标语：静态标语原样保留；延迟徽标无数据来源，降级呈现 -->
+          <!-- 安全标语为静态文案；延迟是本次到网关的实测往返耗时 -->
           <div class="w-full flex items-center justify-between pt-space-sm text-on-surface-variant/60 font-code-badge text-[10px]">
             <span class="flex items-center gap-1">
               <Icon name="memory" class="text-[13px]" />
-              <NotConnected title="延迟未接入" reason="后端没有端到端延迟的实时遥测接口（缺口 G2）。" />
+              <span v-if="latencyText" title="本次控制台到网关的往返耗时">{{ latencyText }}</span>
+              <NotConnected v-else title="延迟未接入" reason="未能完成一次到网关的请求，无法给出往返耗时。" />
             </span>
             <span class="flex items-center gap-1">
               <Icon name="encrypted" class="text-[13px] text-primary" />

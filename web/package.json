@@ -1,5 +1,5 @@
 {
-  "name": "jev-gateway-console",
+  "name": "jev-safety-gateway-console",
   "private": true,
   "version": "2.0.0",
   "description": "JEV 安全网关管理控制台（Vue 3 + Vite + TypeScript + Tailwind）",

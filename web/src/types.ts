@@ -125,3 +125,41 @@ export interface LogModelsResponse {
 export interface SetupStatus {
   needs_setup: boolean
 }
+
+/**
+ * `GET /api/version` 的响应：构建标识 + 实际绑定的监听地址。
+ *
+ * 这是唯一免鉴权的 `/api/` 路由（登录页在登录前就要读它），所以字段里没有任何
+ * 来自审计日志的内容。地址由后端在 listen 成功后回填，是**实际**绑定值而非配置串：
+ * 配置写 `:8080` 时这里也是 `:8080`（表示不限网卡）。
+ */
+export interface VersionInfo {
+  version: string
+  /** 短提交号；无 git 元信息时为空串。 */
+  commit: string
+  built_at: string
+  /** 构建该二进制的 Go 版本，例如 go1.23.4。 */
+  go: string
+  /** 代理（业务）监听地址。 */
+  proxy_addr: string
+  /** 管理口监听地址。 */
+  admin_addr: string
+}
+
+/**
+ * 与 internal/config/models.go 的 `LatencyStats` 对应：区间内单请求总耗时的分布。
+ *
+ * `count` 始终是区间内的真实记录数；`sampled` 为真时表示记录数超过后端取样上限，
+ * 各分位数由按时间均匀的样本算出，只能当参考值展示，不要标成精确值。
+ */
+export interface LatencyStats {
+  count: number
+  sampled: boolean
+  p50: number
+  p90: number
+  p95: number
+  p99: number
+  avg: number
+  min: number
+  max: number
+}

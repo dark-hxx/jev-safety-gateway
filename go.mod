@@ -1,4 +1,4 @@
-module jev-gateway
+module jev-safety-gateway
 
 go 1.23
 

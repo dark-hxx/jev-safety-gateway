@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"jev-gateway/internal/config"
-	"jev-gateway/internal/jev"
+	"jev-safety-gateway/internal/config"
+	"jev-safety-gateway/internal/jev"
 )
 
 // nopKeys satisfies jev.KeyProvider with an empty pool. Every test here avoids
@@ -23,7 +23,7 @@ func (nopKeys) MarkKeyUsed(int64)               {}
 
 func newTestHandler(t *testing.T, set config.Settings) *Handler {
 	t.Helper()
-	store, err := config.Open(filepath.Join(t.TempDir(), "gateway.db"))
+	store, err := config.Open(filepath.Join(t.TempDir(), "jev-safety-gateway.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -47,7 +47,7 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
             <Icon name="shield-check" class="text-[18px]" />
           </div>
           <div class="flex flex-col">
-            <span class="text-headline font-headline text-on-surface tracking-tight leading-tight">JEV Gateway</span>
+            <span class="text-headline font-headline text-on-surface tracking-tight leading-tight">JEV Safety Gateway</span>
             <span class="text-caption-2 font-caption-2 text-outline leading-tight">AI Safety Control</span>
           </div>
         </div>

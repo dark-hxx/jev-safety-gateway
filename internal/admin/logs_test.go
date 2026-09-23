@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"jev-gateway/internal/config"
+	"jev-safety-gateway/internal/config"
 )
 
 // 审计页的筛选条件与模型下拉都走这里：新增的模型选项端点、以及 /api/logs 新增的

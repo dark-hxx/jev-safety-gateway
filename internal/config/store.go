@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +79,9 @@ func (s *Store) migrate() error {
 			snippet    TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC)`,
+		// Covers the latency percentile query: both columns come from the index,
+		// so the window scan never touches the table rows.
+		`CREATE INDEX IF NOT EXISTS idx_logs_ts_latency ON logs(ts DESC, latency_ms)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
@@ -499,6 +503,94 @@ func (s *Store) StatsSince(since time.Time) (Stats, error) {
 		}
 	}
 	return st, rows.Err()
+}
+
+// latencySampleLimit caps how many log rows a latency query is allowed to sort.
+// Percentiles are computed in Go from the sampled rows, so an uncapped window
+// would pull every row of a busy gateway's log into memory at once.
+const latencySampleLimit = 20000
+
+// LatencySince returns the latency distribution over the logs of the window.
+//
+// The sample is taken newest-first. That ordering is deliberate and load
+// bearing: sorting by latency and truncating instead would keep only the
+// fastest rows of the window and push every percentile down, which is the one
+// mistake this function must not make. When the window holds more rows than the
+// cap the result is labelled Sampled so the console can present it as
+// indicative instead of as an exact P99.
+func (s *Store) LatencySince(since time.Time) (LatencyStats, error) {
+	return s.latencySince(since, latencySampleLimit)
+}
+
+// latencySince is LatencySince with the sample cap exposed, so tests can drive
+// the sampled path without inserting twenty thousand rows.
+func (s *Store) latencySince(since time.Time, limit int) (LatencyStats, error) {
+	var st LatencyStats
+	sinceMS := since.UnixMilli()
+
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM logs WHERE ts>=?`, sinceMS).Scan(&st.Count); err != nil {
+		return st, err
+	}
+	if st.Count == 0 {
+		return st, nil
+	}
+
+	rows, err := s.db.Query(
+		`SELECT latency_ms FROM logs WHERE ts>=? ORDER BY ts DESC LIMIT ?`,
+		sinceMS, limit)
+	if err != nil {
+		return st, err
+	}
+	defer rows.Close()
+
+	vals := make([]int64, 0, min(int(st.Count), limit))
+	for rows.Next() {
+		var ms int64
+		if err := rows.Scan(&ms); err != nil {
+			return st, err
+		}
+		vals = append(vals, ms)
+	}
+	if err := rows.Err(); err != nil {
+		return st, err
+	}
+	if len(vals) == 0 {
+		return st, nil
+	}
+
+	slices.Sort(vals)
+	st.Sampled = st.Count > int64(len(vals))
+	st.Min, st.Max = vals[0], vals[len(vals)-1]
+	var sum int64
+	for _, v := range vals {
+		sum += v
+	}
+	st.Avg = float64(sum) / float64(len(vals))
+	st.P50 = percentile(vals, 50)
+	st.P90 = percentile(vals, 90)
+	st.P95 = percentile(vals, 95)
+	st.P99 = percentile(vals, 99)
+	return st, nil
+}
+
+// percentile reads the p-th percentile out of an ascending slice using the
+// nearest-rank definition: the smallest sample that is at or above p% of them.
+// Nearest-rank is used rather than an interpolating definition because it can
+// only ever return a value that actually occurred, which is the honest thing to
+// show for a duration nobody has smoothed.
+func percentile(sorted []int64, p int) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	rank := (p*len(sorted) + 99) / 100 // ceil(p/100 * n)
+	if rank < 1 {
+		rank = 1
+	}
+	if rank > len(sorted) {
+		rank = len(sorted)
+	}
+	return float64(sorted[rank-1])
 }
 
 // BucketSeconds derives the trend-series bucket size from the requested window.

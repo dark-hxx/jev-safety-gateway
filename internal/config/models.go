@@ -187,3 +187,23 @@ type ScoreHistogram struct {
 
 // ScoreSlots is the fixed number of equal-width slots in ScoreHistogram.Counts.
 const ScoreSlots = 5
+
+// LatencyStats is the latency distribution of the window, from the single
+// whole-request duration each log row carries (see AuditView: the gateway
+// records one total, not a per-stage split).
+//
+// Sampled is set when the window held more rows than the store is willing to
+// sort: the percentiles are then computed from a time-uniform sample, so they
+// are indicative rather than exact. Count always reports the true row count of
+// the window, sampled or not.
+type LatencyStats struct {
+	Count   int64   `json:"count"`
+	Sampled bool    `json:"sampled"`
+	P50     float64 `json:"p50"`
+	P90     float64 `json:"p90"`
+	P95     float64 `json:"p95"`
+	P99     float64 `json:"p99"`
+	Avg     float64 `json:"avg"`
+	Min     int64   `json:"min"`
+	Max     int64   `json:"max"`
+}
