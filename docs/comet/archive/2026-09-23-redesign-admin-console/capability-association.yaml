@@ -1,0 +1,13 @@
+schema: comet.capability-association.v1
+status: explicit
+workflow: native
+capability: admin-console
+current_spec: docs/comet/specs/admin-console/spec.md
+current_hash: 07e1923da60a66cc9ba0d77256c92dab893c58454fd464b94a01df53c57c6c49
+confidence: high
+query: 根据原型界面重构管理控制台前端架构（驾驶舱、网关配置、转发审计记录），并补齐所需后端数据与接口
+reason: 用户显式指定能力，已直接核对当前总 Spec 路径。
+historical_sources: []
+evidence:
+  - source: docs/comet/specs/admin-console/spec.md
+    kind: native-spec
