@@ -2,6 +2,7 @@
 /gateway
 /gateway.exe
 /out/
+/out/
 
 # 本地数据 / 数据库
 /data/
