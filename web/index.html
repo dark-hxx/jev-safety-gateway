@@ -119,21 +119,38 @@
         <div class="card-head">
           <h2>最近请求</h2>
           <div class="filters">
-            <select id="log-filter">
-              <option value="">全部</option>
+            <select id="log-filter" title="判定状态">
+              <option value="">全部状态</option>
               <option value="allow">放行</option>
               <option value="block">拦截</option>
               <option value="skip">跳过</option>
               <option value="error">错误</option>
             </select>
+            <select id="log-range" title="时间范围">
+              <option value="0">全部时间</option>
+              <option value="1">最近 1 小时</option>
+              <option value="6">最近 6 小时</option>
+              <option value="24">最近 24 小时</option>
+              <option value="168">最近 7 天</option>
+            </select>
+            <input id="log-model" placeholder="模型筛选" title="按模型名筛选" />
+            <input id="log-q" placeholder="关键词（路径/IP/原因/内容…）" title="关键词搜索" />
             <button id="log-refresh" class="ghost">刷新</button>
           </div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap logs-scroll">
           <table id="logs-table" class="table">
             <thead><tr><th>时间</th><th>方法</th><th>路径</th><th>类型</th><th>模型</th><th>判定</th><th>分数</th><th>耗时</th><th>来源IP</th><th>原因</th><th>送检内容预览</th></tr></thead>
             <tbody></tbody>
           </table>
+        </div>
+        <div class="pager" id="log-pager">
+          <span class="muted" id="log-summary"></span>
+          <div class="pager-ctrl">
+            <button id="log-prev" class="ghost" disabled>上一页</button>
+            <span class="muted" id="log-page">第 1 / 共 1 页</span>
+            <button id="log-next" class="ghost" disabled>下一页</button>
+          </div>
         </div>
       </section>
     </main>

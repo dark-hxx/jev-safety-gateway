@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -310,32 +311,79 @@ func nullFloat(f *float64) interface{} {
 	return *f
 }
 
-// RecentLogs returns up to limit recent log entries, optionally filtered by decision.
-func (s *Store) RecentLogs(limit int, decision string) ([]LogEntry, error) {
+// LogFilter describes filtering and pagination for a log query. Zero-valued
+// fields mean "no constraint" (except Limit/Offset which are normalized).
+type LogFilter struct {
+	Limit    int    // page size; normalized to [1,1000], default 50
+	Offset   int    // records to skip; negatives treated as 0
+	Decision string // exact decision match: allow|block|skip|error; "" = any
+	Model    string // substring match on model; "" = any
+	Query    string // keyword substring across path/model/ip/reason/snippet; "" = any
+	Since    int64  // unix ms lower bound (ts >= Since); <=0 = no bound
+}
+
+// QueryLogs returns a page of log entries matching filter (newest first) plus
+// the total number of matching entries ignoring Limit/Offset. All user-supplied
+// values are bound as parameters to avoid SQL injection.
+func (s *Store) QueryLogs(f LogFilter) ([]LogEntry, int64, error) {
+	limit := f.Limit
 	if limit <= 0 || limit > 1000 {
-		limit = 200
+		limit = 50
 	}
-	q := `SELECT id,ts,method,path,kind,decision,score,model,latency_ms,ip,reason,snippet FROM logs`
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Shared WHERE clause + args for both the count and the page query.
+	where := ""
 	args := []interface{}{}
-	if decision != "" {
-		q += ` WHERE decision=?`
-		args = append(args, decision)
+	add := func(cond string, val interface{}) {
+		if where == "" {
+			where = " WHERE "
+		} else {
+			where += " AND "
+		}
+		where += cond
+		args = append(args, val)
 	}
-	q += ` ORDER BY id DESC LIMIT ?`
-	args = append(args, limit)
-	rows, err := s.db.Query(q, args...)
+	if f.Decision != "" {
+		add("decision=?", f.Decision)
+	}
+	if f.Model != "" {
+		add("model LIKE ? ESCAPE '\\'", "%"+likeEscape(f.Model)+"%")
+	}
+	if f.Query != "" {
+		kw := "%" + likeEscape(f.Query) + "%"
+		add("(path LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\' OR ip LIKE ? ESCAPE '\\' OR reason LIKE ? ESCAPE '\\' OR snippet LIKE ? ESCAPE '\\')", kw)
+		// add() only appends one arg; append the remaining four for the OR group.
+		args = append(args, kw, kw, kw, kw)
+	}
+	if f.Since > 0 {
+		add("ts>=?", f.Since)
+	}
+
+	var total int64
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs`+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	pageArgs := append(append([]interface{}{}, args...), limit, offset)
+	rows, err := s.db.Query(
+		`SELECT id,ts,method,path,kind,decision,score,model,latency_ms,ip,reason,snippet FROM logs`+
+			where+` ORDER BY id DESC LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []LogEntry
+	out := []LogEntry{}
 	for rows.Next() {
 		var e LogEntry
 		var ts int64
 		var score sql.NullFloat64
 		if err := rows.Scan(&e.ID, &ts, &e.Method, &e.Path, &e.Kind, &e.Decision,
 			&score, &e.Model, &e.LatencyMS, &e.IP, &e.Reason, &e.Snippet); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		e.TS = time.UnixMilli(ts)
 		if score.Valid {
@@ -344,7 +392,14 @@ func (s *Store) RecentLogs(limit int, decision string) ([]LogEntry, error) {
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
+}
+
+// likeEscape escapes SQL LIKE wildcards so user keywords match literally.
+// Pairs with `ESCAPE '\'` in the query.
+func likeEscape(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
 }
 
 // StatsSince aggregates decisions since the given time.

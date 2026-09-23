@@ -229,12 +229,49 @@ async function delKey(id) {
 }
 
 // --- logs ---
+const LOG_PAGE_SIZE = 50;
+let logPage = 0; // zero-based current page
+let logTotal = 0;
+
+// Reset to the first page and reload (used when any filter changes).
+function reloadLogs() {
+  logPage = 0;
+  loadLogs();
+}
+
+function buildLogQuery() {
+  const p = new URLSearchParams();
+  p.set("limit", String(LOG_PAGE_SIZE));
+  p.set("offset", String(logPage * LOG_PAGE_SIZE));
+  const decision = $("log-filter").value;
+  if (decision) p.set("decision", decision);
+  const model = $("log-model").value.trim();
+  if (model) p.set("model", model);
+  const q = $("log-q").value.trim();
+  if (q) p.set("q", q);
+  const hours = parseInt($("log-range").value, 10);
+  if (hours > 0) p.set("since", String(Date.now() - hours * 3600 * 1000));
+  return p.toString();
+}
+
+function renderPager() {
+  const totalPages = Math.max(1, Math.ceil(logTotal / LOG_PAGE_SIZE));
+  if (logPage > totalPages - 1) logPage = totalPages - 1;
+  $("log-page").textContent = `第 ${logPage + 1} / 共 ${totalPages} 页`;
+  $("log-summary").textContent = logTotal
+    ? `共 ${logTotal} 条记录`
+    : "共 0 条记录";
+  $("log-prev").disabled = logPage <= 0;
+  $("log-next").disabled = logPage >= totalPages - 1;
+}
+
 async function loadLogs() {
-  const filter = $("log-filter").value;
-  const q = filter ? `?decision=${filter}&limit=200` : "?limit=200";
-  const logs = await api("/api/logs" + q);
+  const res = await api("/api/logs?" + buildLogQuery());
+  const logs = res.items || [];
+  logTotal = res.total || 0;
+  renderPager();
   const tb = $("logs-table").querySelector("tbody");
-  if (!logs || !logs.length) {
+  if (!logs.length) {
     tb.innerHTML = `<tr><td colspan="11" class="muted">暂无记录</td></tr>`;
     return;
   }
@@ -279,7 +316,29 @@ $("logout").addEventListener("click", logout);
 $("settings-form").addEventListener("submit", saveSettings);
 $("k_add").addEventListener("click", addKey);
 $("log-refresh").addEventListener("click", loadLogs);
-$("log-filter").addEventListener("change", loadLogs);
+$("log-filter").addEventListener("change", reloadLogs);
+$("log-range").addEventListener("change", reloadLogs);
+// Debounce free-text filters so we don't query on every keystroke.
+let logSearchTimer = null;
+function onLogSearchInput() {
+  clearTimeout(logSearchTimer);
+  logSearchTimer = setTimeout(reloadLogs, 350);
+}
+$("log-model").addEventListener("input", onLogSearchInput);
+$("log-q").addEventListener("input", onLogSearchInput);
+$("log-prev").addEventListener("click", () => {
+  if (logPage > 0) {
+    logPage -= 1;
+    loadLogs();
+  }
+});
+$("log-next").addEventListener("click", () => {
+  const totalPages = Math.max(1, Math.ceil(logTotal / LOG_PAGE_SIZE));
+  if (logPage < totalPages - 1) {
+    logPage += 1;
+    loadLogs();
+  }
+});
 
 // --- boot ---
 (async function boot() {

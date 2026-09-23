@@ -10,15 +10,25 @@
   --ok: #3fb950;
   --err: #f85149;
   --warn: #d29922;
+  /* System font stacks — no web fonts, works offline. */
+  --font-sans: "Inter", "Inter var", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code",
+    "Cascadia Mono", "Menlo", "Consolas", "Liberation Mono", monospace;
 }
 
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 .hidden { display: none !important; }
 .muted { color: var(--muted); font-weight: normal; }
@@ -102,7 +112,7 @@ input, textarea, select {
   border-radius: 7px;
   padding: 9px 11px;
   font-size: 14px;
-  font-family: inherit;
+  font-family: var(--font-sans);
 }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--primary); }
 textarea { resize: vertical; }
@@ -113,8 +123,9 @@ button {
   padding: 9px 16px;
   font-size: 14px;
   cursor: pointer;
-  font-family: inherit;
+  font-family: var(--font-sans);
 }
+button:disabled { opacity: .45; cursor: not-allowed; }
 button.primary { background: var(--primary); color: #fff; }
 button.primary:hover { background: var(--primary-d); }
 button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
@@ -131,8 +142,17 @@ button.danger { background: transparent; color: var(--err); border: 1px solid va
 #logs-table { min-width: 760px; }  /* keep columns readable; wrapper scrolls */
 .table th, .table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .table th { color: var(--muted); font-weight: 500; }
-.table td.mono, .table td .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.table td.mono, .table td .mono { font-family: var(--font-mono); font-size: 12px; }
 .table tbody tr:hover { background: var(--panel2); }
+
+/* Recent-requests log list: cap height and scroll internally with a sticky head. */
+.logs-scroll { max-height: 60vh; overflow-y: auto; }
+.logs-scroll thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
 
 .pill { padding: 3px 10px; border-radius: 20px; font-size: 12px; border: 1px solid var(--border); }
 .pill.on { color: var(--ok); border-color: var(--ok); }
@@ -144,7 +164,26 @@ button.danger { background: transparent; color: var(--err); border: 1px solid va
 .tag.skip { color: var(--muted); background: rgba(139,148,158,.12); }
 .tag.error { color: var(--warn); background: rgba(210,153,34,.12); }
 
-.filters { display: flex; gap: 8px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.filters input { min-width: 140px; }
+.filters input, .filters select, .filters button { padding: 7px 10px; font-size: 13px; }
+@media (max-width: 560px) {
+  .card-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .filters input { flex: 1; min-width: 0; }
+}
+
+/* Pagination bar under the log table */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.pager-ctrl { display: flex; align-items: center; gap: 10px; }
+.pager-ctrl button { padding: 6px 12px; font-size: 13px; }
+#log-page { font-size: 13px; }
 
 .snippet {
   max-width: 320px;

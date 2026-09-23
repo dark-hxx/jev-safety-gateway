@@ -106,23 +106,18 @@ curl http://localhost:8080/v1/chat/completions \
 
 ### 1. 编译
 
-```bash
-cd jev
+```powershell
 go mod tidy                        # 首次：拉取依赖并生成 go.sum（需联网）
-go build -o gateway ./cmd/gateway  # Windows 可用 gateway.exe
+go build -o .\gateway.exe .\cmd\gateway
 ```
 
 ### 2. 启动
 
-```bash
+```powershell
 # 本地把数据库放到项目目录（默认 /data 在 Windows / 无权限环境下写不了）
-JEV_DB_PATH=./data/gateway.db JEV_PROXY_ADDR=:8080 JEV_ADMIN_ADDR=:8081 ./gateway
+$env:JEV_DB_PATH = ".\data\gateway.db"
+.\gateway.exe
 ```
-
-> Windows PowerShell 里设置环境变量的写法不同：
-> ```powershell
-> $env:JEV_DB_PATH="./data/gateway.db"; ./gateway.exe
-> ```
 
 看到下面两行即启动成功：
 

@@ -227,14 +227,23 @@ func (h *Handler) keyItem(w http.ResponseWriter, r *http.Request) {
 // --- logs & stats ---
 
 func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	decision := r.URL.Query().Get("decision")
-	entries, err := h.store.RecentLogs(limit, decision)
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	since, _ := strconv.ParseInt(q.Get("since"), 10, 64)
+	entries, total, err := h.store.QueryLogs(config.LogFilter{
+		Limit:    limit,
+		Offset:   offset,
+		Decision: q.Get("decision"),
+		Model:    strings.TrimSpace(q.Get("model")),
+		Query:    strings.TrimSpace(q.Get("q")),
+		Since:    since,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
 		return
 	}
-	writeJSON(w, http.StatusOK, entries)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": entries, "total": total})
 }
 
 func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
