@@ -37,6 +37,7 @@ func New(store *config.Store, webFS fs.FS) *Handler {
 	mux.HandleFunc("/api/keys", h.auth(h.keys))
 	mux.HandleFunc("/api/keys/", h.auth(h.keyItem))
 	mux.HandleFunc("/api/logs", h.auth(h.logs))
+	mux.HandleFunc("/api/logs/models", h.auth(h.logModels))
 	mux.HandleFunc("/api/stats", h.auth(h.stats))
 	mux.HandleFunc("/api/setup-status", h.setupStatus)
 	mux.HandleFunc("/api/setup", h.setup)
@@ -237,6 +238,8 @@ func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
 		Offset:   offset,
 		Decision: q.Get("decision"),
 		Model:    strings.TrimSpace(q.Get("model")),
+		Path:     strings.TrimSpace(q.Get("path")),
+		IP:       strings.TrimSpace(q.Get("ip")),
 		Query:    strings.TrimSpace(q.Get("q")),
 		Since:    since,
 	})
@@ -245,6 +248,20 @@ func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": entries, "total": total})
+}
+
+// logModels serves the model choices for the audit filter dropdown: the model
+// values that actually occur in the log, with counts, most frequent first. Only
+// the `since` window scopes the list — see config.Store.LogModels for why the
+// other filters deliberately do not.
+func (h *Handler) logModels(w http.ResponseWriter, r *http.Request) {
+	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+	models, err := h.store.LogModels(since)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": models})
 }
 
 func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {

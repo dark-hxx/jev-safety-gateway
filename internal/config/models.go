@@ -40,6 +40,13 @@ type Settings struct {
 	// token-by-token delivery.
 	CheckResponse bool `json:"check_response"`
 
+	// RejectOversizeBody decides what happens to a request body too large to
+	// inspect (see internal/proxy.maxInspectBody). Off by default: such bodies
+	// are forwarded untouched, so uploads and fine-tune datasets still work. When
+	// on, they are rejected with HTTP 413 instead — fail closed, but it breaks
+	// any endpoint whose legitimate payloads exceed the inspection limit.
+	RejectOversizeBody bool `json:"reject_oversize_body"`
+
 	// --- Per-IP abuse detection ---
 
 	// AbuseEnabled turns on temporary IP bans for repeated harmful requests.
@@ -65,6 +72,27 @@ type Settings struct {
 
 	// JEVTimeoutMS is the per-call timeout for the JEV evaluation.
 	JEVTimeoutMS int `json:"jev_timeout_ms"`
+
+	// --- Audit retention ---
+
+	// RecordSnippet persists the extracted text ("送检摘要") of each evaluated
+	// request into the logs table. Off by default: the log then carries no user
+	// content at all, and the console renders a placeholder instead. The debug
+	// trace (JEV_DEBUG) is gated by the same switch, so user text cannot leak
+	// into stdout while recording is off.
+	RecordSnippet bool `json:"record_snippet"`
+
+	// --- Verdict reuse ---
+
+	// DedupEnabled reuses the JEV verdict for an identical submission (same text
+	// and same evaluation parameters) within DedupWindowSec, instead of paying
+	// for another JEV call. Clients that replay the whole conversation on every
+	// turn submit the very same user text dozens of times in a row, so this
+	// mainly removes redundant calls, not redundant checks.
+	DedupEnabled bool `json:"dedup_enabled"`
+
+	// DedupWindowSec is how long (seconds) a verdict may be reused.
+	DedupWindowSec int `json:"dedup_window_sec"`
 }
 
 // DefaultSettings returns sensible defaults for a fresh install.
@@ -79,6 +107,8 @@ func DefaultSettings() Settings {
 		BlockIfBelow:      true,
 		FailOpen:          true,
 		CheckResponse:     false,
+
+		RejectOversizeBody: false,
 		BlockMessage:      "请求内容被安全网关拦截 (blocked by JEV safety gateway).",
 		MaxStateChars:     16000,
 		JEVTimeoutMS:      8000,
@@ -86,6 +116,9 @@ func DefaultSettings() Settings {
 		AbuseWindowSec:    60,
 		AbuseMaxHarmful:   5,
 		AbuseBanSec:       300,
+		RecordSnippet:     false,
+		DedupEnabled:      true,
+		DedupWindowSec:    60,
 	}
 }
 
@@ -134,6 +167,14 @@ type StatBucket struct {
 	Total   int64 `json:"total"`
 	Allowed int64 `json:"allowed"`
 	Blocked int64 `json:"blocked"`
+}
+
+// ModelCount is one model value seen in the audit log and how often it occurred.
+// The console builds its model dropdown from these, so the choices are always
+// values that actually appear in the log rather than a hard-coded list.
+type ModelCount struct {
+	Value string `json:"value"`
+	Count int64  `json:"count"`
 }
 
 // ScoreHistogram is the risk-score distribution over all evaluated records of

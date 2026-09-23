@@ -14,6 +14,7 @@ export interface Settings {
   block_if_below: boolean
   fail_open: boolean
   check_response: boolean
+  reject_oversize_body: boolean
   abuse_enabled: boolean
   abuse_window_sec: number
   abuse_max_harmful: number
@@ -21,6 +22,12 @@ export interface Settings {
   block_message: string
   max_state_chars: number
   jev_timeout_ms: number
+  /** 是否记录用户送检摘要；默认关闭，关闭时后端不持久化送检文本。 */
+  record_snippet: boolean
+  /** 是否复用相同送检内容的检定结果；默认开启。 */
+  dedup_enabled: boolean
+  /** 检定结果复用窗口（秒）；≤0 时后端回退为 60。 */
+  dedup_window_sec: number
 }
 
 /** 与 internal/config/models.go 的 `JEVKey` 对应（`key` 仅在新增时提交，列表返回掩码）。 */
@@ -101,6 +108,17 @@ export interface StateResponse {
 export interface LogsResponse {
   items: LogEntry[] | null
   total: number
+}
+
+/** 与 internal/config/models.go 的 `ModelCount` 对应：一个模型取值及其出现次数。 */
+export interface ModelCount {
+  value: string
+  count: number
+}
+
+/** `GET /api/logs/models` 的响应，用于审计页的模型下拉选项。 */
+export interface LogModelsResponse {
+  items: ModelCount[] | null
 }
 
 /** `GET /api/setup-status` 的响应。 */

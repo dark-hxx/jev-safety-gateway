@@ -22,6 +22,7 @@ import (
 	"jev-gateway/internal/extract"
 	"jev-gateway/internal/jev"
 	"jev-gateway/internal/logx"
+	"jev-gateway/internal/scorecache"
 )
 
 // Handler is the filtering reverse proxy HTTP handler.
@@ -29,6 +30,7 @@ type Handler struct {
 	store *config.Store
 	jev   *jev.Client
 	abuse *abuse.Tracker
+	cache *scorecache.Cache
 	http  *http.Client // used only when response auditing is enabled
 }
 
@@ -38,14 +40,80 @@ func New(store *config.Store, client *jev.Client) *Handler {
 		store: store,
 		jev:   client,
 		abuse: abuse.New(),
+		cache: scorecache.New(),
 		http:  &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
 const (
-	maxRequestBody  = 8 << 20  // 8 MiB
-	maxResponseBody = 32 << 20 // 32 MiB (only buffered when auditing responses)
+	// maxInspectBody is the largest request body the gateway buffers in order to
+	// inspect it. Larger bodies are streamed through untouched (or rejected,
+	// when RejectOversizeBody is set) but are never truncated: a truncated body
+	// is corrupt JSON, so the upstream would reject every large client request
+	// and the client would never learn the gateway was at fault.
+	maxInspectBody = 8 << 20
+
+	// maxResponseBody caps the upstream response buffered when auditing
+	// responses (CheckResponse).
+	maxResponseBody = 32 << 20
 )
+
+// requestBody is a request body that can be inspected and then forwarded
+// byte-for-byte. Bodies larger than maxInspectBody keep only a prefix for
+// logging; the unread remainder is still on the client connection and is
+// streamed through after that prefix, so the upstream always receives exactly
+// the bytes the client sent.
+type requestBody struct {
+	prefix  []byte
+	rest    io.ReadCloser // unread remainder; nil once the whole body is buffered
+	inspect bool          // prefix holds the complete body, so it can be checked
+	size    int64         // original Content-Length, or -1 when unknown
+}
+
+// readBody buffers the request body when it is small enough to inspect, and
+// otherwise leaves the remainder streaming (see requestBody).
+func readBody(r *http.Request) (*requestBody, error) {
+	b := &requestBody{size: r.ContentLength}
+	if r.ContentLength > maxInspectBody {
+		b.rest = r.Body // far too large to buffer: forward it as it arrives
+		return b, nil
+	}
+	prefix, err := io.ReadAll(io.LimitReader(r.Body, maxInspectBody))
+	if err != nil {
+		return nil, err
+	}
+	b.prefix = prefix
+	// With no Content-Length, filling the cap means more may still be coming.
+	if r.ContentLength < 0 && int64(len(prefix)) == maxInspectBody {
+		b.rest = r.Body
+		return b, nil
+	}
+	_ = r.Body.Close()
+	b.inspect = true
+	return b, nil
+}
+
+// oversize reports whether the body was too large to buffer and inspect.
+func (b *requestBody) oversize() bool { return b.rest != nil }
+
+// describe renders the body size for logs.
+func (b *requestBody) describe() string {
+	if b.size < 0 {
+		return "unknown length"
+	}
+	return strconv.FormatInt(b.size, 10) + " bytes"
+}
+
+// reader returns a fresh reader over the whole body (prefix plus remainder).
+func (b *requestBody) reader() io.ReadCloser {
+	if b.rest == nil {
+		return io.NopCloser(bytes.NewReader(b.prefix))
+	}
+	return struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(b.prefix), b.rest), b.rest}
+}
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -73,18 +141,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Read and retain the body so we can both inspect and forward it.
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBody))
-	_ = r.Body.Close()
+	// Read and retain the body so we can both inspect and forward it. A body too
+	// large to inspect is streamed through untouched rather than truncated.
+	body, err := readBody(r)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"failed to read request body"}}`, http.StatusBadRequest)
 		return
 	}
-	logx.Debugf("  body=%d bytes", len(body))
+	logx.Debugf("  body=%d bytes inspect=%v", len(body.prefix), body.inspect)
 
 	decision, kind, model, score, reason, snippet := h.decide(r, set, body)
-	logx.Debugf("  decision=%s kind=%s model=%q score=%s reason=%q snippet=%q",
-		decision, kind, model, scoreStr(score), reason, snippet)
+
+	// An un-inspectable body is forwarded untouched by default; operators who
+	// would rather fail closed reject it outright instead.
+	oversizeReject := false
+	if body.oversize() && set.Enabled && set.RejectOversizeBody {
+		decision, oversizeReject = "block", true
+		reason = "oversize body rejected: " + reason
+	}
+	logx.Debugf("  decision=%s kind=%s model=%q score=%s reason=%q snippet=%s",
+		decision, kind, model, scoreStr(score), reason, debugSnippet(set, snippet))
 
 	// A genuine harmful-content block (score present) counts as a strike; enough
 	// strikes within the window ban the IP.
@@ -106,10 +182,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		LatencyMS: time.Since(start).Milliseconds(),
 		IP:        ip,
 		Reason:    reason,
-		Snippet:   snippet,
+		Snippet:   auditSnippet(set, snippet),
 	})
 
 	if decision == "block" {
+		if oversizeReject {
+			_ = r.Body.Close() // the body was never read
+			h.writeTooLarge(w)
+			return
+		}
 		h.writeBlocked(w, set, score)
 		return
 	}
@@ -125,27 +206,48 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // decide runs the safety evaluation and returns the decision plus metadata.
 // decision is one of: allow, block, skip, error.
-func (h *Handler) decide(r *http.Request, set config.Settings, body []byte) (decision, kind, model string, score *float64, reason, snippet string) {
+func (h *Handler) decide(r *http.Request, set config.Settings, body *requestBody) (decision, kind, model string, score *float64, reason, snippet string) {
 	if !set.Enabled {
-		return "skip", "disabled", extractModel(body), nil, "gateway disabled", ""
+		return "skip", "disabled", peekModel(body.prefix), nil, "gateway disabled", ""
 	}
-	// Only inspect JSON bodies on write methods; forward the rest untouched.
+	// Only inspect write methods; forward the rest untouched.
 	if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch {
 		return "skip", "non-write", "", nil, "non-write method", ""
 	}
-	if !strings.Contains(strings.ToLower(r.Header.Get("Content-Type")), "json") {
-		return "skip", "non-json", "", nil, "non-json content-type", ""
+	if !body.inspect {
+		return "skip", "oversize", peekModel(body.prefix), nil,
+			"body too large to inspect (" + body.describe() + ")", ""
+	}
+	// Only inspect bodies we can parse: JSON and multipart/form-data (the
+	// form-accepting endpoints: audio transcriptions, image edits, uploads).
+	// Anything else — raw binary uploads, text/plain — forwards untouched.
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	if !strings.Contains(ct, "json") && !strings.HasPrefix(ct, "multipart/form-data") {
+		return "skip", "non-json", "", nil, "uninspectable content-type", ""
 	}
 
-	res := extract.Extract(r.URL.Path, body)
+	res := extract.Extract(r.URL.Path, r.Header.Get("Content-Type"), body.prefix)
 	if !res.Checkable || strings.TrimSpace(res.Text) == "" {
 		return "skip", res.Kind, res.Model, nil, "no extractable input", ""
 	}
 
 	stateText := extract.Clamp(res.Text, set.MaxStateChars)
-	// The exact text sent to JEV — recorded so extraction can be debugged from
-	// the console (e.g. spotting when a client's system prompt is being sent).
+	// The exact text sent to JEV, kept for the audit trail and the debug trace.
+	// Whether the audit row stores it is up to the operator (auditSnippet).
 	snippet = preview(stateText, 200)
+	key := cacheKey(set, stateText)
+	now := time.Now()
+
+	// An identical submission — same text, same evaluation parameters — reuses the
+	// previous verdict inside the dedup window instead of paying for another JEV
+	// call. Only successful evaluations are cached: an error is re-evaluated every
+	// time, so FailOpen/FailClosed keep their meaning.
+	if val, ok := h.cachedScore(set, key, now); ok {
+		score = &val
+		decision, reason = classify(set, val, reusedMarker)
+		return decision, res.Kind, res.Model, score, reason, snippet
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(set.JEVTimeoutMS+2000)*time.Millisecond)
 	defer cancel()
 
@@ -164,17 +266,92 @@ func (h *Handler) decide(r *http.Request, set config.Settings, body []byte) (dec
 		return "block", res.Kind, res.Model, nil, "JEV error, fail-closed: " + err.Error(), snippet
 	}
 
+	if set.DedupEnabled {
+		h.cache.Put(key, val, now)
+	}
 	score = &val
-	harmful := false
+	decision, reason = classify(set, val, "")
+	return decision, res.Kind, res.Model, score, reason, snippet
+}
+
+// cacheKey identifies one submission to the safety model: the text plus every
+// parameter that can change the verdict. Two submissions sharing a key must
+// score identically, so a stored score may be reused verbatim.
+func cacheKey(set config.Settings, stateText string) string {
+	return scorecache.Key(
+		set.JEVBaseURL,
+		set.JEVModel,
+		set.SafetyInstruction,
+		strconv.FormatFloat(set.SafetyThreshold, 'g', -1, 64),
+		strconv.FormatBool(set.BlockIfBelow),
+		stateText,
+	)
+}
+
+// cachedScore returns a reusable verdict for key, or false when dedup is off or
+// nothing was cached inside the (currently configured) window.
+func (h *Handler) cachedScore(set config.Settings, key string, now time.Time) (float64, bool) {
+	if !set.DedupEnabled {
+		return 0, false
+	}
+	return h.cache.Get(key, dedupWindow(set), now)
+}
+
+// dedupWindow is how long a verdict may be reused. A non-positive configured
+// window falls back to the default, matching config.UpdateSettings.
+func dedupWindow(set config.Settings) time.Duration {
+	sec := set.DedupWindowSec
+	if sec <= 0 {
+		sec = 60
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// harmfulScore reports whether a score crosses the block threshold in the
+// direction the configured instruction is phrased for.
+func harmfulScore(set config.Settings, score float64) bool {
 	if set.BlockIfBelow {
-		harmful = val < set.SafetyThreshold
-	} else {
-		harmful = val >= set.SafetyThreshold
+		return score < set.SafetyThreshold
 	}
-	if harmful {
-		return "block", res.Kind, res.Model, score, "safety score below threshold", snippet
+	return score >= set.SafetyThreshold
+}
+
+// classify maps a safety score to the decision and reason shared by a fresh and
+// a reused verdict. mark is appended to the reason: callers pass reusedMarker for
+// a cached verdict and "" for a freshly evaluated one.
+func classify(set config.Settings, score float64, mark string) (decision, reason string) {
+	if harmfulScore(set, score) {
+		return "block", "safety score below threshold" + mark
 	}
-	return "allow", res.Kind, res.Model, score, "safe", snippet
+	return "allow", "safe" + mark
+}
+
+// reusedMarker is appended to the reason of a verdict that came from the dedup
+// cache rather than a fresh JEV call, so the console explains the missing call.
+const reusedMarker = "；命中相同内容缓存"
+
+// snippetSuppressed replaces the submission text in the debug trace while
+// snippet recording is off.
+const snippetSuppressed = "<未记录：已关闭送检摘要记录>"
+
+// auditSnippet returns the text to persist in the audit row. With record_snippet
+// off (the default) the gateway stores no user content at all: the row carries an
+// empty snippet and the console renders a placeholder instead.
+func auditSnippet(set config.Settings, snippet string) string {
+	if !set.RecordSnippet {
+		return ""
+	}
+	return snippet
+}
+
+// debugSnippet renders the submission text for the debug trace. With recording
+// off the text must not reach stdout — but printing an empty string would read as
+// "nothing was extracted", so the trace says the text was withheld instead.
+func debugSnippet(set config.Settings, snippet string) string {
+	if !set.RecordSnippet && snippet != "" {
+		return strconv.Quote(snippetSuppressed)
+	}
+	return strconv.Quote(snippet)
 }
 
 // preview returns a single-line, truncated copy of s for logging.
@@ -218,6 +395,22 @@ func (h *Handler) writeBanned(w http.ResponseWriter, set config.Settings, until 
 	})
 }
 
+// writeTooLarge rejects a request body that is too large to inspect. Used only
+// when RejectOversizeBody is on, so that an operator can fail closed instead of
+// forwarding an unchecked body.
+func (h *Handler) writeTooLarge(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-JEV-Gateway", "blocked")
+	w.WriteHeader(http.StatusRequestEntityTooLarge)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"error": map[string]interface{}{
+			"message": "请求体超过安全网关可检查的体积上限，已被拒绝 (request body too large to inspect by JEV safety gateway).",
+			"type":    "jev_oversize_body",
+			"code":    "request_too_large",
+		},
+	})
+}
+
 func formatRetryAfter(until time.Time) string {
 	secs := int(time.Until(until).Seconds())
 	if secs < 1 {
@@ -228,7 +421,7 @@ func formatRetryAfter(until time.Time) string {
 
 // forward proxies the (approved) request to the upstream base URL, preserving
 // path, query, headers and streaming the response back.
-func (h *Handler) forward(w http.ResponseWriter, r *http.Request, set config.Settings, body []byte) {
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, set config.Settings, body *requestBody) {
 	target, err := url.Parse(set.UpstreamBaseURL)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"invalid upstream url"}}`, http.StatusBadGateway)
@@ -243,12 +436,15 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, set config.Set
 			// Join upstream base path with the incoming path.
 			req.URL.Path = singleJoin(target.Path, req.URL.Path)
 			req.Host = target.Host
-			// Restore the buffered body.
-			req.Body = io.NopCloser(bytes.NewReader(body))
-			req.ContentLength = int64(len(body))
-			req.Header.Set("X-JEV-Gateway", "allow")
+			// Restore the body and keep its original framing: -1 means the client
+			// sent no Content-Length, so the request must stay chunked.
+			req.Body = body.reader()
+			req.ContentLength = body.size
 		},
 		ModifyResponse: func(resp *http.Response) error {
+			// The gateway's verdict belongs on the response to the client, not on
+			// the request forwarded upstream.
+			resp.Header.Set("X-JEV-Gateway", "allow")
 			logx.Debugf("  ← upstream %d %s (stream passthrough)", resp.StatusCode, resp.Request.URL)
 			return nil
 		},
@@ -288,7 +484,7 @@ func copyHeaders(dst, src http.Header) {
 
 // forwardChecked performs a buffered round-trip to the upstream, then audits the
 // response body with JEV before returning it. Used only when CheckResponse is on.
-func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start time.Time, set config.Settings, body []byte) {
+func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start time.Time, set config.Settings, body *requestBody) {
 	target, err := url.Parse(set.UpstreamBaseURL)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"invalid upstream url"}}`, http.StatusBadGateway)
@@ -298,15 +494,15 @@ func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start t
 	outURL.Path = singleJoin(target.Path, r.URL.Path)
 	outURL.RawQuery = r.URL.RawQuery
 
-	out, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), bytes.NewReader(body))
+	out, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), body.reader())
 	if err != nil {
 		http.Error(w, `{"error":{"message":"build upstream request failed"}}`, http.StatusBadGateway)
 		return
 	}
 	copyHeaders(out.Header, r.Header)
-	out.Header.Set("X-JEV-Gateway", "allow")
 	out.Host = target.Host
-	out.ContentLength = int64(len(body))
+	// Preserve the client's framing: -1 keeps the request chunked.
+	out.ContentLength = body.size
 
 	resp, err := h.http.Do(out)
 	if err != nil {
@@ -322,32 +518,54 @@ func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start t
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		res := extract.Output(resp.Header.Get("Content-Type"), respBody)
 		if res.Checkable {
-			ctx, cancel := context.WithTimeout(r.Context(), time.Duration(set.JEVTimeoutMS+2000)*time.Millisecond)
-			val, jerr := h.jev.Score(ctx, jev.Params{
-				BaseURL:     set.JEVBaseURL,
-				Model:       set.JEVModel,
-				State:       extract.Clamp(res.Text, set.MaxStateChars),
-				Instruction: set.SafetyInstruction,
-				TimeoutMS:   set.JEVTimeoutMS,
-			})
-			cancel()
+			stateText := extract.Clamp(res.Text, set.MaxStateChars)
+			key := cacheKey(set, stateText)
+			now := time.Now()
 
 			blocked := false
 			reason := "response safe"
 			var score *float64
-			if jerr != nil {
-				log.Printf("jev response evaluation error: %v", jerr)
-				if !set.FailOpen {
-					blocked = true
-					reason = "response JEV error, fail-closed"
+			var jerr error
+
+			// Same dedup rule as the request path: an identical audited response
+			// reuses the previous verdict instead of paying for another JEV call.
+			if val, ok := h.cachedScore(set, key, now); ok {
+				score = &val
+				blocked = harmfulScore(set, val)
+				if blocked {
+					reason = "response score below threshold" + reusedMarker
 				} else {
-					reason = "response JEV error, fail-open"
+					reason = "response safe" + reusedMarker
 				}
 			} else {
-				score = &val
-				if (set.BlockIfBelow && val < set.SafetyThreshold) || (!set.BlockIfBelow && val >= set.SafetyThreshold) {
-					blocked = true
-					reason = "response score below threshold"
+				ctx, cancel := context.WithTimeout(r.Context(), time.Duration(set.JEVTimeoutMS+2000)*time.Millisecond)
+				val, err := h.jev.Score(ctx, jev.Params{
+					BaseURL:     set.JEVBaseURL,
+					Model:       set.JEVModel,
+					State:       stateText,
+					Instruction: set.SafetyInstruction,
+					TimeoutMS:   set.JEVTimeoutMS,
+				})
+				cancel()
+				jerr = err
+
+				if jerr != nil {
+					log.Printf("jev response evaluation error: %v", jerr)
+					if !set.FailOpen {
+						blocked = true
+						reason = "response JEV error, fail-closed"
+					} else {
+						reason = "response JEV error, fail-open"
+					}
+				} else {
+					if set.DedupEnabled {
+						h.cache.Put(key, val, now)
+					}
+					score = &val
+					if harmfulScore(set, val) {
+						blocked = true
+						reason = "response score below threshold"
+					}
 				}
 			}
 
@@ -355,7 +573,7 @@ func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start t
 				TS: start, Method: r.Method, Path: r.URL.Path, Kind: "response",
 				Decision: decisionWord(blocked, jerr), Score: score,
 				LatencyMS: time.Since(start).Milliseconds(), IP: clientIP(r), Reason: reason,
-				Snippet: preview(res.Text, 200),
+				Snippet: auditSnippet(set, preview(res.Text, 200)),
 			})
 			if blocked {
 				h.writeBlocked(w, set, score)
@@ -392,7 +610,7 @@ func singleJoin(a, b string) string {
 	return a + b
 }
 
-func extractModel(body []byte) string {
+func peekModel(body []byte) string {
 	var m struct {
 		Model string `json:"model"`
 	}

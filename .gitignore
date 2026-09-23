@@ -1,6 +1,8 @@
 # 构建产物
 /gateway
 /gateway.exe
+# Windows 上覆盖正在运行的二进制时留下的备份（gateway.exe~）
+/gateway.exe~
 /out/
 
 # 本地数据 / 数据库

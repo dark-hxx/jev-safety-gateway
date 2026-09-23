@@ -336,6 +336,34 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
           />
           <span class="text-caption-2 font-caption-2 text-outline">超时后的行为由「JEV 异常放行」开关决定；填 0 或负数时后端回退为 8000。</span>
         </label>
+
+        <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
+          <input v-model="form.record_snippet" type="checkbox" class="mt-0.5 h-4 w-4 accent-[#4b8eff]" />
+          <span class="flex flex-col gap-0.5">
+            <span class="text-subheadline font-subheadline text-on-surface">记录用户送检摘要</span>
+            <span class="text-caption-2 font-caption-2 text-outline">默认关闭：关闭时数据库不保存送检文本，审计列表与详情以「未记录」占位展示，<span class="mono">JEV_DEBUG</span> 调试日志同样不打印送检文本。</span>
+          </span>
+        </label>
+
+        <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
+          <input v-model="form.dedup_enabled" type="checkbox" class="mt-0.5 h-4 w-4 accent-[#4b8eff]" />
+          <span class="flex flex-col gap-0.5">
+            <span class="text-subheadline font-subheadline text-on-surface">相同内容送检去重</span>
+            <span class="text-caption-2 font-caption-2 text-outline">默认开启：窗口内重复出现的送检内容直接复用上次分值、不再调用 JEV，命中记录在「原因」列追加标记；关闭时每次都重新检定。</span>
+          </span>
+        </label>
+
+        <label class="flex flex-col gap-1.5">
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant">去重窗口（秒）</span>
+          <input
+            v-model.number="form.dedup_window_sec"
+            type="number"
+            min="1"
+            :disabled="!form.dedup_enabled"
+            class="w-full px-3 py-2.5 rounded-xl bg-surface-container-high text-on-surface font-code-body text-code-body focus:outline-none focus:bg-surface-container-highest disabled:opacity-50 shadow-inset"
+          />
+          <span class="text-caption-2 font-caption-2 text-outline">复用时长；≤0 时后端回退为 60。去重关闭时该值不参与判定。</span>
+        </label>
       </div>
     </section>
 
@@ -467,6 +495,14 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
             <span class="flex flex-col gap-0.5">
               <span class="text-subheadline font-subheadline text-on-surface">JEV 异常时放行（Fail-Open）</span>
               <span class="text-caption-2 font-caption-2 text-outline">开启时 JEV 不可达则照常转发；关闭时改为阻断（Fail-Close）。</span>
+            </span>
+          </label>
+
+          <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
+            <input v-model="form.reject_oversize_body" type="checkbox" class="mt-0.5 h-4 w-4 accent-[#4b8eff]" />
+            <span class="flex flex-col gap-0.5">
+              <span class="text-subheadline font-subheadline text-on-surface">拒绝无法检查的超大请求体</span>
+              <span class="text-caption-2 font-caption-2 text-outline">请求体超过 8 MiB 时无法送检。关闭时原样转发（默认，保证大文件上传可用）；开启时返回 <span class="mono">413</span> 失败关闭。</span>
             </span>
           </label>
         </div>

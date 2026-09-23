@@ -98,7 +98,10 @@ func (s *Store) load() error {
 	if err != nil {
 		return err
 	}
-	var set Settings
+	// Decode on top of the defaults so a key that is absent from the stored blob
+	// (a setting added by a newer build) keeps its default instead of silently
+	// becoming the zero value — a bool would otherwise read as "off".
+	set := DefaultSettings()
 	if err := json.Unmarshal([]byte(raw), &set); err != nil {
 		return fmt.Errorf("decode settings: %w", err)
 	}
@@ -170,6 +173,9 @@ func (s *Store) UpdateSettings(set Settings) error {
 		if set.AbuseBanSec <= 0 {
 			set.AbuseBanSec = 300
 		}
+	}
+	if set.DedupEnabled && set.DedupWindowSec <= 0 {
+		set.DedupWindowSec = 60
 	}
 	return s.saveSettings(set)
 }
@@ -313,11 +319,20 @@ func nullFloat(f *float64) interface{} {
 
 // LogFilter describes filtering and pagination for a log query. Zero-valued
 // fields mean "no constraint" (except Limit/Offset which are normalized).
+//
+// The three text conditions differ on purpose, matching how the console offers
+// them: Model comes from a dropdown of values that exist in the log, so it is an
+// exact match (a substring would also drag in every longer model sharing the
+// prefix); IP is typed and matches by prefix, so both a full address and a
+// "194.26." style fragment work; Path is typed and matches as a substring, so a
+// leading fragment finds the endpoints under it.
 type LogFilter struct {
 	Limit    int    // page size; normalized to [1,1000], default 50
 	Offset   int    // records to skip; negatives treated as 0
 	Decision string // exact decision match: allow|block|skip|error; "" = any
-	Model    string // substring match on model; "" = any
+	Model    string // exact match on model; "" = any
+	Path     string // substring match on path; "" = any
+	IP       string // prefix match on ip ("194.26.*" and "127.0.0.1" both work); "" = any
 	Query    string // keyword substring across path/model/ip/reason/snippet; "" = any
 	Since    int64  // unix ms lower bound (ts >= Since); <=0 = no bound
 }
@@ -351,7 +366,15 @@ func (s *Store) QueryLogs(f LogFilter) ([]LogEntry, int64, error) {
 		add("decision=?", f.Decision)
 	}
 	if f.Model != "" {
-		add("model LIKE ? ESCAPE '\\'", "%"+likeEscape(f.Model)+"%")
+		add("model=?", f.Model)
+	}
+	if f.Path != "" {
+		add("path LIKE ? ESCAPE '\\'", "%"+likeEscape(f.Path)+"%")
+	}
+	if f.IP != "" {
+		if prefix := ipPrefix(f.IP); prefix != "" {
+			add("ip LIKE ? ESCAPE '\\'", likeEscape(prefix)+"%")
+		}
 	}
 	if f.Query != "" {
 		kw := "%" + likeEscape(f.Query) + "%"
@@ -395,11 +418,56 @@ func (s *Store) QueryLogs(f LogFilter) ([]LogEntry, int64, error) {
 	return out, total, rows.Err()
 }
 
+// modelChoicesMax bounds the model dropdown: enough to be useful, small enough
+// that the response and the rendered option list stay bounded.
+const modelChoicesMax = 200
+
+// LogModels returns the model values present in the log with their occurrence
+// counts, most frequent first, for building the console's model dropdown. Only
+// the time window applies — the choice list is deliberately not narrowed by the
+// other active filters, because selecting one model would then hide every other
+// choice and the operator could not switch. Records with no model (a skip, or a
+// request rejected before scoring) contribute no choice rather than an empty one.
+func (s *Store) LogModels(since int64) ([]ModelCount, error) {
+	where := " WHERE model<>''"
+	args := []interface{}{}
+	if since > 0 {
+		where += " AND ts>=?"
+		args = append(args, since)
+	}
+	args = append(args, modelChoicesMax)
+
+	rows, err := s.db.Query(
+		`SELECT model, COUNT(*) FROM logs`+where+
+			` GROUP BY model ORDER BY COUNT(*) DESC, model ASC LIMIT ?`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModelCount{}
+	for rows.Next() {
+		var m ModelCount
+		if err := rows.Scan(&m.Value, &m.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // likeEscape escapes SQL LIKE wildcards so user keywords match literally.
 // Pairs with `ESCAPE '\'` in the query.
 func likeEscape(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(s)
+}
+
+// ipPrefix turns a typed IP filter into a LIKE prefix. A trailing "*" is the
+// wildcard the console advertises ("194.26.*"), so it is dropped; the rest is
+// matched as a literal prefix, which means a complete address still matches only
+// itself. An empty result carries no constraint, so the caller skips the clause.
+func ipPrefix(s string) string {
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "*"))
 }
 
 // StatsSince aggregates decisions since the given time.

@@ -19,7 +19,7 @@
   - 未知路径回退到通用文本收集，尽量不漏检
 - **多 JEV 密钥轮询**：配置多个 TypeSafe apikey，轮流调用并在 401/429/529 时自动切换下一个密钥。
 - **可配置拦截策略**：安全阈值、判定指令、拦截提示语；JEV 故障时可选 **fail-open（放行）** 或 fail-closed（拦截）。
-- **内置管理控制台**：Vue 3 单页应用，含运行概览（转送量、判定构成、逐桶流量趋势、风险分值分布）、网关与安全策略配置、转发审计记录（多条件筛选 + 服务端分页）三个界面；构建产物随仓库提交，运行期无公网依赖。
+- **内置管理控制台**：Vue 3 单页应用，含运行概览（转送量、判定构成、逐桶流量趋势、风险分值分布）、网关与安全策略配置、转发审计记录（可按判定状态、目标模型、来源 IP、请求路径、关键词、时间范围筛选，服务端分页）三个界面；构建产物随仓库提交，运行期无公网依赖。
 - **SQLite 持久化 + 管理员口令登录**，Docker 一键部署。
 
 ## 快速开始（Docker）
@@ -53,8 +53,12 @@ docker compose up -d --build
 | `block_if_below` | 低于阈值即拦截（指令为“是否安全”时勾选；若指令改为“是否有害”则取消勾选） | `true` |
 | `fail_open` | JEV 不可用时是否放行 | `true` |
 | `check_response` | 是否同时审核上游响应内容（开启后响应不再流式） | `false` |
+| `reject_oversize_body` | 请求体超过 8 MiB 而无法送检时是否直接拒绝（关闭则原样转发） | `false` |
 | `max_state_chars` | 送检文本最大字符数（控制 JEV token 成本） | `16000` |
 | `jev_timeout_ms` | 单次 JEV 调用超时 | `8000` |
+| `record_snippet` | 是否持久化用户送检摘要（关闭时日志不含任何送检文本） | `false` |
+| `dedup_enabled` | 相同送检内容在窗口内复用上次检定结果 | `true` |
+| `dedup_window_sec` | 检定结果复用窗口（秒，≤0 回退为 `60`） | `60` |
 | `block_message` | 拦截时返回的提示语 | 见默认 |
 | `abuse_enabled` | 同一 IP 频繁攻击时临时封禁 | `true` |
 | `abuse_window_sec` | 统计窗口（秒） | `60` |
@@ -66,6 +70,26 @@ docker compose up -d --build
 ```json
 { "error": { "message": "...", "type": "jev_safety_block", "code": "content_blocked" } }
 ```
+
+### 端点覆盖与请求体转发
+
+网关对**所有** OpenAI 格式端点做同一套处理：能从请求里取出用户文本就送检，取不出就原样转发；转发**不改变字节**，因此流式（SSE）、分块请求、大文件上传都不受影响。
+
+- 覆盖的端点：`/chat/completions`、`/completions`、`/responses`、`/embeddings`、`/moderations`、`/images/*`、`/audio/speech`、`/videos*`、`/realtime/sessions`、`/assistants`、`/threads/*`、`/rerank`、Anthropic `/messages`、Gemini `:generateContent`；`multipart/form-data`（转写、图片编辑等）按表单字段取文本，跳过文件部分。
+- 明知不含用户文本的端点（`/files`、`/uploads`、`/batches`、`/fine_tuning/*`、`/vector_stores*`、`/models`）记为 `skip`，不会被误判为“未知端点”。
+- 未识别的路径回退为“收集请求体里所有字符串”（跳过 `data:` 内嵌数据），因此新端点也不会漏检。
+- 送检的**只是最新一轮用户输入**，不带客户端注入的系统提示词和整段历史：否则有害内容会被大量无害文本稀释而判为安全。OpenAI 的 `tool` 角色、Anthropic 的 `tool_result`、Responses 的 `function_call_output` 都算最新一轮（Agent 循环里最新提交的常常就是工具输出）。
+- 请求体超过 8 MiB 时无法送检：默认**原样转发**（记为 `skip` / `oversize`，大文件上传照常可用）；勾选 `reject_oversize_body` 后改为失败关闭，返回 **413**：
+
+```json
+{ "error": { "message": "...", "type": "jev_oversize_body", "code": "request_too_large" } }
+```
+
+### 送检摘要记录与检定结果复用
+
+`record_snippet` 默认**关闭**：审计日志只保留判定结果、分值与原因，不写入用户送检文本，`JEV_DEBUG` 调试日志同样不打印该文本；控制台的「转发审计记录」以「未记录」占位展示。该开关只影响开关关闭后写入的新记录，不追溯修改已有记录。
+
+`dedup_enabled` 默认**开启**：同一段送检文本（连同 JEV 地址、模型、判定指令、阈值与拦截方向一起参与比对）在 `dedup_window_sec` 秒内重复出现时，直接复用上一次的分值，不再调用 JEV；审计记录的「原因」列会追加「；命中相同内容缓存」。缓存只保存文本的 sha256 摘要与分值，不保存送检文本本身；命中拦截时照常累计滥用计数，封禁语义不变。缓存位于进程内存中，重启即清空。
 
 ### 滥用防护（按 IP 限流）
 

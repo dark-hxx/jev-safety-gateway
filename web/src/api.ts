@@ -3,13 +3,14 @@
  *   POST /api/login  POST /api/setup  GET /api/setup-status  POST /api/logout
  *   GET  /api/state  GET/PUT /api/settings
  *   GET/POST /api/keys  POST /api/keys/{id}/enable|disable  DELETE /api/keys/{id}
- *   GET  /api/logs   GET /api/stats?hours=
- * 本次重构不新增任何接口。
+ *   GET  /api/logs   GET /api/logs/models   GET /api/stats?hours=
  */
 import type {
   JEVKey,
   LogEntry,
+  LogModelsResponse,
   LogsResponse,
+  ModelCount,
   Settings,
   SetupStatus,
   StatBucket,
@@ -157,7 +158,12 @@ export interface LogFilter {
   limit: number
   offset: number
   decision?: string
+  /** 精确匹配；取值来自 queryLogModels 的下拉，不是随手输入的片段。 */
   model?: string
+  /** 子串匹配，例如 /v1/chat 命中 /v1/chat/completions。 */
+  path?: string
+  /** 前缀匹配，完整地址与 194.26.* 这类片段都可以。 */
+  ip?: string
   q?: string
   since?: number
 }
@@ -168,9 +174,21 @@ export function queryLogs(f: LogFilter): Promise<LogsResponse> {
   p.set('offset', String(f.offset))
   if (f.decision) p.set('decision', f.decision)
   if (f.model) p.set('model', f.model)
+  if (f.path) p.set('path', f.path)
+  if (f.ip) p.set('ip', f.ip)
   if (f.q) p.set('q', f.q)
   if (f.since && f.since > 0) p.set('since', String(f.since))
   return request<LogsResponse>('/api/logs?' + p.toString())
 }
 
-export type { JEVKey, LogEntry, LogsResponse, Settings, StatBucket, Stats, StatsResponse, StateResponse }
+/**
+ * 审计页模型下拉的选项：库中真实出现过的模型及次数，按次数倒序。
+ * 只受时间窗影响——不叠加其它筛选条件，否则选中一个模型后下拉里就只剩它自己。
+ */
+export function queryLogModels(since: number): Promise<LogModelsResponse> {
+  const p = new URLSearchParams()
+  if (since > 0) p.set('since', String(since))
+  return request<LogModelsResponse>('/api/logs/models?' + p.toString())
+}
+
+export type { JEVKey, LogEntry, LogModelsResponse, LogsResponse, ModelCount, Settings, StatBucket, Stats, StatsResponse, StateResponse }

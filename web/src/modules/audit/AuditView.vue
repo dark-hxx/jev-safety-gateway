@@ -5,13 +5,18 @@ import NotConnected from '../../components/NotConnected.vue'
 import * as api from '../../api'
 import { useConsole } from '../../console'
 import { clockOf, dateTimeOf, decisionStyle, methodClass, num, score, scoreWidth } from '../../format'
-import type { LogEntry } from '../../types'
+import type { LogEntry, ModelCount } from '../../types'
 
 /**
  * 转发审计记录。
  *
- * 数据全部来自既有 `GET /api/logs`（参数语义：limit / offset / decision / model / q / since，
- * 响应 `{items,total}`）与 `GET /api/state` 带回的 `stats24h`。
+ * 数据全部来自既有 `GET /api/logs`（参数语义：limit / offset / decision / model / path /
+ * ip / q / since，响应 `{items,total}`）、`GET /api/logs/models`（模型下拉选项）与
+ * `GET /api/state` 带回的 `stats24h`。
+ *
+ * 三个文本条件的匹配语义各不相同，与后端一致：模型为**精确**匹配（取值来自下拉，
+ * 精确才不会把 gpt-4o-mini 一起带出来）、来源 IP 为**前缀**匹配（完整地址与
+ * `194.26.*` 都可用）、请求路径为**子串**匹配。
  *
  * 原型中依赖缺失后端的列与操作——地理位置、处置规则矩阵、全局请求唯一 ID、
  * 完整原始请求体、耗时分解、Token 估算与风险级、导出 CSV、加入黑名单、重放测试——
@@ -19,7 +24,17 @@ import type { LogEntry } from '../../types'
  *
  * 所有字段经 Vue 模板插值渲染，默认转义，等价于原实现的 `escapeHtml`，可防 XSS。
  */
-const { stats24h } = useConsole()
+const { settings, stats24h } = useConsole()
+
+/**
+ * 送检摘要是否落盘。关闭时后端写入的 `snippet` 恒为空串，界面用占位符说明，
+ * 而不是显示成与「没抽到可送检内容」无法区分的 `-`；开关打开期间写入的旧记录
+ * 照常有值、照常显示。
+ */
+const snippetRecorded = computed(() => settings.value.record_snippet)
+
+/** 关闭摘要记录时，审计列表与详情中代替摘要的占位文本。 */
+const SNIPPET_PLACEHOLDER = '未记录'
 
 const PAGE_SIZE = 50
 
@@ -43,9 +58,14 @@ const DECISIONS = [
 
 const decision = ref('')
 const model = ref('')
+const path = ref('')
+const ip = ref('')
 const q = ref('')
 const sinceIdx = ref(0)
 const offset = ref(0)
+
+/** 模型下拉的选项：`GET /api/logs/models` 返回的真实取值与次数。 */
+const modelOptions = ref<ModelCount[]>([])
 
 const items = ref<LogEntry[]>([])
 const total = ref(0)
@@ -72,6 +92,8 @@ async function load(): Promise<void> {
       offset: offset.value,
       decision: decision.value,
       model: model.value.trim(),
+      path: path.value.trim(),
+      ip: ip.value.trim(),
       q: q.value.trim(),
       since: sinceMs.value,
     })
@@ -99,7 +121,38 @@ function onFilterChange(): void {
   debounceTimer = window.setTimeout(() => void load(), 300)
 }
 
-watch([decision, sinceIdx, model, q], onFilterChange)
+watch([decision, sinceIdx, model, path, ip, q], onFilterChange)
+
+/**
+ * 拉取模型下拉的选项。失败时不阻塞列表：下拉退化为只剩「全部模型」与当前选中项，
+ * 而不是编造选项——控制台只显示有来源的值。
+ */
+async function loadModels(): Promise<void> {
+  try {
+    const res = await api.queryLogModels(sinceMs.value)
+    modelOptions.value = res.items ?? []
+  } catch {
+    modelOptions.value = []
+  }
+}
+
+/**
+ * 选项只受时间窗影响（与其他筛选条件无关，否则选中一个模型后下拉里就只剩它自己），
+ * 因此只跟时间窗联动重取。
+ */
+watch(sinceIdx, () => void loadModels())
+
+/**
+ * 真正渲染的选项。若当前选中的模型已不在列表里（时间窗变化或该模型记录被清理），
+ * 仍保留它并标注 `count === 0`，否则原生 select 会显示成空选项、而筛选条件其实
+ * 还在生效——界面不能显示与实际过滤不一致的状态。聚合只返回 count ≥ 1 的模型，
+ * 所以 count 为 0 唯一标识这条兜底选项。
+ */
+const modelChoices = computed<ModelCount[]>(() => {
+  const cur = model.value.trim()
+  if (!cur || modelOptions.value.some((m) => m.value === cur)) return modelOptions.value
+  return [{ value: cur, count: 0 }, ...modelOptions.value]
+})
 
 function go(delta: number): void {
   const next = offset.value + delta * PAGE_SIZE
@@ -110,6 +163,7 @@ function go(delta: number): void {
 
 function refresh(): void {
   void load()
+  void loadModels()
 }
 
 // --- 活跃筛选条件 ---
@@ -126,6 +180,8 @@ const chips = computed<Chip[]>(() => {
     out.push({ label: `判定：${d?.label ?? decision.value}`, clear: () => (decision.value = '') })
   }
   if (model.value.trim()) out.push({ label: `模型：${model.value.trim()}`, clear: () => (model.value = '') })
+  if (ip.value.trim()) out.push({ label: `来源 IP：${ip.value.trim()}`, clear: () => (ip.value = '') })
+  if (path.value.trim()) out.push({ label: `路径：${path.value.trim()}`, clear: () => (path.value = '') })
   if (q.value.trim()) out.push({ label: `关键词：${q.value.trim()}`, clear: () => (q.value = '') })
   if (sinceIdx.value > 0) {
     out.push({ label: `时间：${SINCE_OPTIONS[sinceIdx.value].label}`, clear: () => (sinceIdx.value = 0) })
@@ -136,6 +192,8 @@ const chips = computed<Chip[]>(() => {
 function clearAll(): void {
   decision.value = ''
   model.value = ''
+  ip.value = ''
+  path.value = ''
   q.value = ''
   sinceIdx.value = 0
 }
@@ -156,6 +214,7 @@ function onKeydown(e: KeyboardEvent): void {
 
 onMounted(() => {
   void load()
+  void loadModels()
   window.addEventListener('keydown', onKeydown)
 })
 onBeforeUnmount(() => {
@@ -176,7 +235,7 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <p class="text-subheadline font-subheadline text-on-surface-variant">
-          逐条记录送入检定的请求摘要、判定结果与来源，可按判定状态、模型、关键词与时间范围检索。
+          逐条记录送入检定的请求摘要、判定结果与来源，可按判定状态、目标模型、来源 IP、请求路径、关键词与时间范围检索。
         </p>
       </div>
       <div class="flex items-center gap-space-sm">
@@ -258,23 +317,49 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm">
+      <!-- 四个条件按原型顺序：来源 IP → 目标模型 → 请求路径 → 关键词 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-space-sm">
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-2 font-caption-2 text-outline">模型（子串匹配）</span>
+          <span class="text-caption-2 font-caption-2 text-outline">来源 IP（前缀匹配）</span>
           <input
-            v-model="model"
+            v-model="ip"
             type="text"
-            placeholder="例如 gpt-4o"
+            placeholder="例如 194.26.* 或 127.0.0.1"
             spellcheck="false"
-            class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
+            class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset mono"
           />
         </label>
-        <label class="flex flex-col gap-1.5 md:col-span-2">
-          <span class="text-caption-2 font-caption-2 text-outline">关键词（路径 / 模型 / 来源 IP / 原因 / 送检摘要）</span>
+        <label class="flex flex-col gap-1.5">
+          <span class="text-caption-2 font-caption-2 text-outline">目标模型（精确匹配）</span>
+          <span class="relative">
+            <select
+              v-model="model"
+              class="w-full appearance-none pl-3 pr-8 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset mono"
+            >
+              <option value="">全部请求模型</option>
+              <option v-for="m in modelChoices" :key="m.value" :value="m.value">
+                {{ m.count > 0 ? `${m.value} (${num(m.count)})` : `${m.value}（最近无记录）` }}
+              </option>
+            </select>
+            <Icon name="chevron-down" class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-outline text-[16px]" />
+          </span>
+        </label>
+        <label class="flex flex-col gap-1.5">
+          <span class="text-caption-2 font-caption-2 text-outline">请求路径（子串匹配）</span>
+          <input
+            v-model="path"
+            type="text"
+            placeholder="例如 /v1/chat/completions"
+            spellcheck="false"
+            class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset mono"
+          />
+        </label>
+        <label class="flex flex-col gap-1.5">
+          <span class="text-caption-2 font-caption-2 text-outline">关键词（路径 / 模型 / 来源 IP / 原因{{ snippetRecorded ? ' / 送检摘要' : '' }}）</span>
           <input
             v-model="q"
             type="text"
-            placeholder="例如 1.2.3.4 或 /v1/chat/completions"
+            placeholder="例如 1.2.3.4 或 blocked"
             spellcheck="false"
             class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
           />
@@ -376,7 +461,7 @@ onBeforeUnmount(() => {
                 <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2">{{ e.reason || '-' }}</span>
               </td>
               <td class="px-space-sm py-2.5">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2 break-all">{{ e.snippet || '-' }}</span>
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2 break-all">{{ e.snippet || (snippetRecorded ? '-' : SNIPPET_PLACEHOLDER) }}</span>
               </td>
               <td class="px-space-sm py-2.5 text-right">
                 <Icon name="chevron-right" class="text-outline text-[16px]" />
@@ -514,7 +599,10 @@ onBeforeUnmount(() => {
               </div>
               <div class="flex flex-col gap-1 px-space-sm py-2">
                 <dt class="text-caption-1 font-caption-1 text-on-surface-variant">送检摘要</dt>
-                <dd class="text-caption-1 font-caption-1 text-on-surface break-words">{{ selected.snippet || '-' }}</dd>
+                <dd class="text-caption-1 font-caption-1 text-on-surface break-words">{{ selected.snippet || (snippetRecorded ? '-' : SNIPPET_PLACEHOLDER) }}</dd>
+                <span v-if="!snippetRecorded" class="text-caption-2 font-caption-2 text-outline">
+                  当前已关闭「记录用户送检摘要」，网关不再持久化送检文本；该开关不会追溯修改既有记录。
+                </span>
               </div>
             </dl>
           </div>
@@ -545,7 +633,11 @@ onBeforeUnmount(() => {
               </div>
               <div class="flex items-center justify-between gap-space-sm">
                 <span class="text-caption-1 font-caption-1 text-on-surface-variant">完整原始请求体</span>
-                <NotConnected reason="按设计不持久化原始载荷，仅保留截断后的送检摘要。" />
+                <NotConnected
+                  :reason="snippetRecorded
+                    ? '按设计不持久化原始载荷，仅保留截断后的送检摘要。'
+                    : '按设计不持久化原始载荷；当前已关闭送检摘要记录，日志中不含任何送检文本。'"
+                />
               </div>
             </div>
           </div>
