@@ -19,7 +19,7 @@
   - 未知路径回退到通用文本收集，尽量不漏检
 - **多 JEV 密钥轮询**：配置多个 TypeSafe apikey，轮流调用并在 401/429/529 时自动切换下一个密钥。
 - **可配置拦截策略**：安全阈值、判定指令、拦截提示语；JEV 故障时可选 **fail-open（放行）** 或 fail-closed（拦截）。
-- **内置管理控制台**：无依赖的单页前端，用于配置上游 / JEV 地址、增删密钥、查看放行/拦截日志与统计。
+- **内置管理控制台**：Vue 3 单页应用，含运行概览（转送量、判定构成、逐桶流量趋势、风险分值分布）、网关与安全策略配置、转发审计记录（多条件筛选 + 服务端分页）三个界面；构建产物随仓库提交，运行期无公网依赖。
 - **SQLite 持久化 + 管理员口令登录**，Docker 一键部署。
 
 ## 快速开始（Docker）
@@ -179,7 +179,9 @@ internal/jev/              JEV 评估客户端（多密钥轮询 + 重试）
 internal/proxy/            过滤反向代理（判定 → 放行/拦截）
 internal/admin/            管理 API + 口令鉴权
 internal/server/           两个监听器装配（代理 :8080 / 控制台 :8081）
-web/                       内嵌单页控制台 (index.html / app.js / style.css)
+web/                       管理控制台前端工程（Vue 3 + Vite + TS + Tailwind）
+  src/                       源码（路由、模块、组件、接口封装）
+  dist/                      构建产物，随源码入库并经 //go:embed 内嵌
 nginx/gateway.conf         nginx 反代示例
 Dockerfile, docker-compose.yml
 ```

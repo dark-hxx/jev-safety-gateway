@@ -125,3 +125,24 @@ type Stats struct {
 	Skipped int64 `json:"skipped"`
 	Errors  int64 `json:"errors"`
 }
+
+// StatBucket is one time bucket of the decision trend. Buckets are aligned to
+// the bucket boundary and empty ones are filled with zeros by the store, so the
+// series is always continuous over the queried window.
+type StatBucket struct {
+	TS      int64 `json:"ts"` // unix ms at the bucket's start
+	Total   int64 `json:"total"`
+	Allowed int64 `json:"allowed"`
+	Blocked int64 `json:"blocked"`
+}
+
+// ScoreHistogram is the risk-score distribution over all evaluated records of
+// the window: five fixed 0.2-wide slots plus the records that carry no score
+// (JEV unreachable, or a request rejected before scoring).
+type ScoreHistogram struct {
+	Counts   []int64 `json:"counts"`   // [0,0.2) [0.2,0.4) [0.4,0.6) [0.6,0.8) [0.8,1.0]
+	Unscored int64   `json:"unscored"` // score IS NULL
+}
+
+// ScoreSlots is the fixed number of equal-width slots in ScoreHistogram.Counts.
+const ScoreSlots = 5

@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * 基础样式：DESIGN.md 的「材质层级」与「发丝边框」在 CSS 层落地。
+ * 不引 CDN、不内嵌字体文件；字体由 tailwind.config.js 的系统字体栈提供。
+ */
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    overscroll-behavior: none;
+    background-color: theme('colors.surface');
+    /* 暗色为默认模式（DESIGN.md：Dark Mode Default）。 */
+    color-scheme: dark;
+  }
+
+  /* 控制台是内部审计台，滚动条按原型的做法隐藏，避免挤压高密度表格。 */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: theme('colors.surface-container-highest');
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+
+  /* Cupertino 分段控件 / 滑杆的滑块样式。 */
+  input[type='range'] {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 1rem;
+    width: 1rem;
+    border-radius: 9999px;
+    background-color: theme('colors.primary');
+    border: 2px solid theme('colors.surface-container-high');
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid theme('colors.primary');
+    outline-offset: 1px;
+  }
+}
+
+@layer components {
+  /* DESIGN.md：Elevation 1 的材质卡 —— 实底 + 发丝边框。 */
+  .material-card {
+    @apply rounded-2xl bg-surface-container shadow-md;
+    border: 1px solid theme('colors.hairline');
+  }
+
+  /* 顶栏的「ultra-thin material」：半透明底 + 背景模糊。 */
+  .material-bar {
+    @apply bg-surface/80 backdrop-blur-xl;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  /* 等宽内容（时间、路径、密钥、IP、指标）统一走系统等宽字体栈。 */
+  .mono {
+    @apply font-mono;
+  }
+
+  /* 分区标题下的小标签（原型中的 uppercase caption-2）。 */
+  .eyebrow {
+    @apply text-caption-2 font-caption-2 uppercase tracking-wider text-outline;
+  }
+}

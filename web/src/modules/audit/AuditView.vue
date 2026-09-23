@@ -1,0 +1,573 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import Icon from '../../components/Icon.vue'
+import NotConnected from '../../components/NotConnected.vue'
+import * as api from '../../api'
+import { useConsole } from '../../console'
+import { clockOf, dateTimeOf, decisionStyle, methodClass, num, score, scoreWidth } from '../../format'
+import type { LogEntry } from '../../types'
+
+/**
+ * 转发审计记录。
+ *
+ * 数据全部来自既有 `GET /api/logs`（参数语义：limit / offset / decision / model / q / since，
+ * 响应 `{items,total}`）与 `GET /api/state` 带回的 `stats24h`。
+ *
+ * 原型中依赖缺失后端的列与操作——地理位置、处置规则矩阵、全局请求唯一 ID、
+ * 完整原始请求体、耗时分解、Token 估算与风险级、导出 CSV、加入黑名单、重放测试——
+ * 一律以降级态呈现或不予呈现：不显示无来源数值，也不提供无后端支撑的操作。
+ *
+ * 所有字段经 Vue 模板插值渲染，默认转义，等价于原实现的 `escapeHtml`，可防 XSS。
+ */
+const { stats24h } = useConsole()
+
+const PAGE_SIZE = 50
+
+/** 时间范围控件：换算为 `/api/logs` 的 `since`（unix 毫秒下界）。 */
+const SINCE_OPTIONS = [
+  { label: '全部时间', ms: 0 },
+  { label: '最近 1 小时', ms: 3600_000 },
+  { label: '最近 6 小时', ms: 6 * 3600_000 },
+  { label: '最近 24 小时', ms: 24 * 3600_000 },
+  { label: '最近 7 天', ms: 7 * 86400_000 },
+] as const
+
+/** 判定状态控件：取值与后端 `decision` 完全一致。 */
+const DECISIONS = [
+  { value: '', label: '全部状态', en: 'ALL' },
+  { value: 'allow', label: '放行', en: 'ALLOWED' },
+  { value: 'block', label: '拦截', en: 'BLOCKED' },
+  { value: 'skip', label: '跳过', en: 'SKIPPED' },
+  { value: 'error', label: '错误', en: 'ERROR' },
+] as const
+
+const decision = ref('')
+const model = ref('')
+const q = ref('')
+const sinceIdx = ref(0)
+const offset = ref(0)
+
+const items = ref<LogEntry[]>([])
+const total = ref(0)
+const loading = ref(false)
+const loadError = ref('')
+const selected = ref<LogEntry | null>(null)
+
+const pages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
+const page = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1)
+const canPrev = computed(() => offset.value > 0)
+const canNext = computed(() => total.value > 0 && offset.value + PAGE_SIZE < total.value)
+
+const sinceMs = computed(() => {
+  const o = SINCE_OPTIONS[sinceIdx.value]
+  return o.ms > 0 ? Date.now() - o.ms : 0
+})
+
+async function load(): Promise<void> {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const res = await api.queryLogs({
+      limit: PAGE_SIZE,
+      offset: offset.value,
+      decision: decision.value,
+      model: model.value.trim(),
+      q: q.value.trim(),
+      since: sinceMs.value,
+    })
+    items.value = res.items ?? []
+    total.value = res.total ?? 0
+    // 记录在翻页途中被过滤/清理时，回到最后一个有效页。
+    if (!items.value.length && offset.value > 0 && total.value > 0) {
+      offset.value = Math.max(0, (Math.ceil(total.value / PAGE_SIZE) - 1) * PAGE_SIZE)
+      await load()
+    }
+  } catch (e) {
+    loadError.value = e instanceof Error ? e.message : String(e)
+    items.value = []
+    total.value = 0
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 任一筛选控件变化：立即回到第 1 页，并对连续输入做 300ms 防抖。 */
+let debounceTimer: number | undefined
+function onFilterChange(): void {
+  offset.value = 0
+  if (debounceTimer !== undefined) window.clearTimeout(debounceTimer)
+  debounceTimer = window.setTimeout(() => void load(), 300)
+}
+
+watch([decision, sinceIdx, model, q], onFilterChange)
+
+function go(delta: number): void {
+  const next = offset.value + delta * PAGE_SIZE
+  if (next < 0 || next >= total.value) return
+  offset.value = next
+  void load()
+}
+
+function refresh(): void {
+  void load()
+}
+
+// --- 活跃筛选条件 ---
+
+interface Chip {
+  label: string
+  clear: () => void
+}
+
+const chips = computed<Chip[]>(() => {
+  const out: Chip[] = []
+  if (decision.value) {
+    const d = DECISIONS.find((x) => x.value === decision.value)
+    out.push({ label: `判定：${d?.label ?? decision.value}`, clear: () => (decision.value = '') })
+  }
+  if (model.value.trim()) out.push({ label: `模型：${model.value.trim()}`, clear: () => (model.value = '') })
+  if (q.value.trim()) out.push({ label: `关键词：${q.value.trim()}`, clear: () => (q.value = '') })
+  if (sinceIdx.value > 0) {
+    out.push({ label: `时间：${SINCE_OPTIONS[sinceIdx.value].label}`, clear: () => (sinceIdx.value = 0) })
+  }
+  return out
+})
+
+function clearAll(): void {
+  decision.value = ''
+  model.value = ''
+  q.value = ''
+  sinceIdx.value = 0
+}
+
+// --- 详情抽屉 ---
+
+function openDetail(e: LogEntry): void {
+  selected.value = e
+}
+
+function closeDetail(): void {
+  selected.value = null
+}
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && selected.value) closeDetail()
+}
+
+onMounted(() => {
+  void load()
+  window.addEventListener('keydown', onKeydown)
+})
+onBeforeUnmount(() => {
+  if (debounceTimer !== undefined) window.clearTimeout(debounceTimer)
+  window.removeEventListener('keydown', onKeydown)
+})
+</script>
+
+<template>
+  <div class="w-full px-margin py-margin flex flex-col gap-space-lg">
+    <!-- 页头 -->
+    <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-space-md">
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center gap-space-xs flex-wrap">
+          <h1 class="text-title-2 font-title-2 text-on-surface tracking-tight">请求转发与全量审计记录</h1>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-surface-bright text-on-surface-variant">
+            Forwarding &amp; Audit Stream
+          </span>
+        </div>
+        <p class="text-subheadline font-subheadline text-on-surface-variant">
+          逐条记录送入检定的请求摘要、判定结果与来源，可按判定状态、模型、关键词与时间范围检索。
+        </p>
+      </div>
+      <div class="flex items-center gap-space-sm">
+        <NotConnected reason="后端未提供日志导出接口，无法生成 CSV。" />
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-subheadline font-subheadline text-on-surface transition-all disabled:opacity-50"
+          :disabled="!chips.length"
+          @click="clearAll"
+        >
+          <Icon name="filter-off" class="text-[16px]" />
+          <span>清空筛选</span>
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-subheadline font-subheadline text-on-surface transition-all"
+          :disabled="loading"
+          @click="refresh"
+        >
+          <Icon name="refresh" class="text-[16px]" :class="loading ? 'animate-spin' : ''" />
+          <span>刷新</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 24 小时真实计数（来源 GET /api/state 的 stats24h） -->
+    <section class="grid grid-cols-2 lg:grid-cols-4 gap-space-md">
+      <div class="flex flex-col p-space-sm rounded-2xl bg-surface-container shadow-sm border border-hairline">
+        <span class="eyebrow">24h 总转送</span>
+        <span class="text-title-3 font-title-3 text-on-surface mono">{{ num(stats24h.total) }}</span>
+      </div>
+      <div class="flex flex-col p-space-sm rounded-2xl bg-surface-container shadow-sm border border-hairline">
+        <span class="eyebrow">直接放行</span>
+        <span class="text-title-3 font-title-3 text-secondary mono">{{ num(stats24h.allowed) }}</span>
+      </div>
+      <div class="flex flex-col p-space-sm rounded-2xl bg-surface-container shadow-sm border border-hairline">
+        <span class="eyebrow">威胁拦截</span>
+        <span class="text-title-3 font-title-3 text-error mono">{{ num(stats24h.blocked) }}</span>
+      </div>
+      <div class="flex flex-col p-space-sm rounded-2xl bg-surface-container shadow-sm border border-hairline">
+        <span class="eyebrow">白名单跳过</span>
+        <span class="text-title-3 font-title-3 text-on-surface-variant mono">{{ num(stats24h.skipped) }}</span>
+      </div>
+    </section>
+
+    <!-- 筛选面板 -->
+    <section class="flex flex-col gap-space-md p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
+      <div class="flex flex-col xl:flex-row xl:items-center gap-space-md flex-wrap">
+        <div class="flex items-center gap-space-sm flex-wrap">
+          <span class="eyebrow shrink-0">判定状态</span>
+          <div class="inline-flex p-0.5 bg-surface-container-high rounded-lg flex-wrap">
+            <button
+              v-for="d in DECISIONS"
+              :key="d.value"
+              type="button"
+              class="px-3 py-1 rounded-md text-caption-2 font-caption-2 transition-all"
+              :class="decision === d.value ? 'bg-surface-bright text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'"
+              @click="decision = d.value"
+            >
+              {{ d.label }}
+            </button>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-space-sm flex-wrap">
+          <span class="eyebrow shrink-0">时间范围</span>
+          <div class="inline-flex p-0.5 bg-surface-container-high rounded-lg flex-wrap">
+            <button
+              v-for="(o, i) in SINCE_OPTIONS"
+              :key="o.label"
+              type="button"
+              class="px-3 py-1 rounded-md text-caption-2 font-caption-2 transition-all"
+              :class="sinceIdx === i ? 'bg-surface-bright text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'"
+              @click="sinceIdx = i"
+            >
+              {{ o.label }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm">
+        <label class="flex flex-col gap-1.5">
+          <span class="text-caption-2 font-caption-2 text-outline">模型（子串匹配）</span>
+          <input
+            v-model="model"
+            type="text"
+            placeholder="例如 gpt-4o"
+            spellcheck="false"
+            class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
+          />
+        </label>
+        <label class="flex flex-col gap-1.5 md:col-span-2">
+          <span class="text-caption-2 font-caption-2 text-outline">关键词（路径 / 模型 / 来源 IP / 原因 / 送检摘要）</span>
+          <input
+            v-model="q"
+            type="text"
+            placeholder="例如 1.2.3.4 或 /v1/chat/completions"
+            spellcheck="false"
+            class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
+          />
+        </label>
+      </div>
+
+      <div v-if="chips.length" class="flex items-center gap-space-xs flex-wrap">
+        <span class="eyebrow">活跃条件</span>
+        <button
+          v-for="c in chips"
+          :key="c.label"
+          type="button"
+          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-high hover:bg-surface-container-highest text-caption-2 font-caption-2 text-on-surface-variant transition-colors"
+          @click="c.clear"
+        >
+          <span class="max-w-[16rem] truncate">{{ c.label }}</span>
+          <Icon name="x" class="text-[12px]" />
+        </button>
+        <button type="button" class="text-caption-2 font-caption-2 text-primary hover:underline" @click="clearAll">
+          清空所有标记
+        </button>
+      </div>
+    </section>
+
+    <!-- 列表 -->
+    <section class="flex flex-col rounded-2xl bg-surface-container shadow-lg border border-hairline overflow-hidden">
+      <div class="px-space-md py-space-sm border-b border-hairline flex items-center justify-between flex-wrap gap-space-xs">
+        <div class="flex items-center gap-space-sm">
+          <span class="text-subheadline font-subheadline text-on-surface">审计流水</span>
+          <span v-if="loading" class="text-caption-2 font-caption-2 text-outline">查询中…</span>
+        </div>
+        <div class="flex items-center gap-space-sm">
+          <span v-if="loadError" class="text-caption-1 font-caption-1 text-error">{{ loadError }}</span>
+          <span v-else class="text-caption-1 font-caption-1 text-on-surface-variant">
+            共 <span class="mono text-on-surface">{{ num(total) }}</span> 条
+          </span>
+        </div>
+      </div>
+
+      <!-- 容器最大高度 + 内部纵向滚动 + 表头吸顶 -->
+      <div class="max-h-[32rem] overflow-auto">
+        <table class="w-full min-w-[62rem] text-left border-collapse">
+          <thead class="sticky top-0 z-10 bg-surface-container-high">
+            <tr class="text-caption-2 font-caption-2 text-on-surface-variant">
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">时间</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">方法 / 路径</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">模型</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">判定</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">分值</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">耗时</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">来源 IP</th>
+              <th class="px-space-sm py-2.5 font-medium">原因</th>
+              <th class="px-space-sm py-2.5 font-medium min-w-[14rem]">送检摘要</th>
+              <th class="px-space-sm py-2.5"><span class="sr-only">详情</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="e in items"
+              :key="e.id"
+              class="border-t border-hairline hover:bg-surface-container-high/60 cursor-pointer transition-colors align-top"
+              @click="openDetail(e)"
+            >
+              <td class="px-space-sm py-2.5 whitespace-nowrap">
+                <span class="font-code-body text-code-body text-on-surface mono">{{ clockOf(e.ts) }}</span>
+                <span class="block text-caption-2 font-caption-2 text-outline mono">#{{ e.id }}</span>
+              </td>
+              <td class="px-space-sm py-2.5">
+                <span class="inline-flex px-1.5 py-0.5 rounded text-code-badge font-code-badge mono" :class="methodClass(e.method)">
+                  {{ e.method }}
+                </span>
+                <span class="block font-code-body text-code-body text-on-surface-variant mono truncate max-w-[18rem]" :title="e.path">
+                  {{ e.path }}
+                </span>
+              </td>
+              <td class="px-space-sm py-2.5">
+                <span class="font-code-body text-code-body text-on-surface-variant mono">{{ e.model || '-' }}</span>
+              </td>
+              <td class="px-space-sm py-2.5 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-code-badge font-code-badge" :class="decisionStyle(e.decision).badge">
+                  <span class="h-1.5 w-1.5 rounded-full" :class="decisionStyle(e.decision).dot"></span>
+                  <span>{{ decisionStyle(e.decision).label }}</span>
+                </span>
+                <span class="block text-caption-2 font-caption-2 text-outline mono">{{ decisionStyle(e.decision).en }}</span>
+              </td>
+              <td class="px-space-sm py-2.5">
+                <span class="font-code-body text-code-body mono" :class="decisionStyle(e.decision).text">{{ score(e.score) }}</span>
+                <span class="block mt-1 w-14 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+                  <span class="block h-1 rounded-full" :class="decisionStyle(e.decision).bar" :style="{ width: scoreWidth(e.score) + '%' }"></span>
+                </span>
+              </td>
+              <td class="px-space-sm py-2.5 whitespace-nowrap">
+                <span class="font-code-body text-code-body text-on-surface-variant mono">{{ e.latency_ms }} ms</span>
+              </td>
+              <td class="px-space-sm py-2.5 whitespace-nowrap">
+                <span class="font-code-body text-code-body text-on-surface-variant mono">{{ e.ip || '-' }}</span>
+              </td>
+              <td class="px-space-sm py-2.5">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2">{{ e.reason || '-' }}</span>
+              </td>
+              <td class="px-space-sm py-2.5">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2 break-all">{{ e.snippet || '-' }}</span>
+              </td>
+              <td class="px-space-sm py-2.5 text-right">
+                <Icon name="chevron-right" class="text-outline text-[16px]" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div v-if="!items.length && !loading" class="flex flex-col items-center justify-center gap-1.5 py-space-xl">
+          <Icon name="search" class="text-outline text-[24px]" />
+          <span class="text-subheadline font-subheadline text-on-surface-variant">暂无记录</span>
+          <span class="text-caption-2 font-caption-2 text-outline">
+            {{ chips.length ? '当前筛选条件没有匹配的审计记录。' : '网关尚未产生审计记录。' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- 服务端分页 -->
+      <div class="px-space-md py-space-sm border-t border-hairline flex items-center justify-between flex-wrap gap-space-sm">
+        <span class="text-caption-1 font-caption-1 text-on-surface-variant">
+          {{ items.length ? `显示第 ${num(offset + 1)} - ${num(offset + items.length)} 条，共 ${num(total)} 条` : `共 ${num(total)} 条` }}
+          <span class="text-outline">· 每页 {{ PAGE_SIZE }} 条</span>
+        </span>
+        <div class="flex items-center gap-space-sm">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-caption-1 font-caption-1 text-on-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="!canPrev || loading"
+            @click="go(-1)"
+          >
+            <Icon name="chevron-left" class="text-[14px]" />
+            <span>上一页</span>
+          </button>
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant whitespace-nowrap">
+            第 <span class="mono text-on-surface">{{ page }}</span> / 共 <span class="mono text-on-surface">{{ pages }}</span> 页
+          </span>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-caption-1 font-caption-1 text-on-surface transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="!canNext || loading"
+            @click="go(1)"
+          >
+            <span>下一页</span>
+            <Icon name="chevron-right" class="text-[14px]" />
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 详情抽屉 -->
+    <Transition
+      enter-active-class="transition-transform duration-200 ease-out"
+      enter-from-class="translate-x-full"
+      leave-active-class="transition-transform duration-150 ease-in"
+      leave-to-class="translate-x-full"
+    >
+      <aside
+        v-if="selected"
+        class="fixed top-16 right-0 bottom-0 w-[420px] max-w-full z-40 bg-surface-container-low border-l border-hairline shadow-overlay flex flex-col"
+      >
+        <div class="px-space-md py-space-sm border-b border-hairline flex items-center justify-between gap-space-sm">
+          <div class="flex items-center gap-space-xs min-w-0">
+            <Icon name="search-check" class="text-primary text-[18px] shrink-0" />
+            <div class="flex flex-col min-w-0">
+              <span class="text-headline font-headline text-on-surface">审计详情</span>
+              <span class="text-caption-2 font-caption-2 text-outline mono truncate">#{{ selected.id }} · {{ selected.path }}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="p-1 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors shrink-0"
+            aria-label="关闭详情"
+            @click="closeDetail"
+          >
+            <Icon name="x" class="text-[18px]" />
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-auto px-space-md py-space-md flex flex-col gap-space-md">
+          <!-- 判定结论 -->
+          <div class="flex items-center justify-between p-space-sm rounded-xl" :class="decisionStyle(selected.decision).badge">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 rounded-full" :class="decisionStyle(selected.decision).dot"></span>
+              <span class="text-headline font-headline">{{ decisionStyle(selected.decision).label }}</span>
+              <span class="text-caption-2 font-caption-2 opacity-80 mono">{{ decisionStyle(selected.decision).en }}</span>
+            </div>
+            <span class="text-title-3 font-title-3 mono">{{ score(selected.score) }}</span>
+          </div>
+
+          <!-- 全部已持久化字段 -->
+          <div class="flex flex-col rounded-xl bg-surface-container overflow-hidden">
+            <div class="px-space-sm py-2 border-b border-hairline">
+              <span class="eyebrow">已持久化字段</span>
+            </div>
+            <dl class="divide-y divide-hairline">
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">记录 ID</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.id }}</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">时间</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ dateTimeOf(selected.ts) }}</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">方法</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.method }}</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">路径</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right break-all">{{ selected.path }}</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">内容类型</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.kind || '-' }}</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">目标模型</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right break-all">{{ selected.model || '-' }}</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">分值</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ score(selected.score) }}</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">网关耗时</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.latency_ms }} ms</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">来源 IP</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.ip || '-' }}</dd>
+              </div>
+              <div class="flex flex-col gap-1 px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant">原因</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface break-words">{{ selected.reason || '-' }}</dd>
+              </div>
+              <div class="flex flex-col gap-1 px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant">送检摘要</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface break-words">{{ selected.snippet || '-' }}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <!-- 未持久化字段：明确降级，不留空值也不编造 -->
+          <div class="flex flex-col gap-space-sm p-space-sm rounded-xl border border-dashed border-outline-variant/60">
+            <span class="eyebrow">未持久化字段</span>
+            <div class="flex flex-col gap-space-xs">
+              <div class="flex items-center justify-between gap-space-sm">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">地理位置</span>
+                <NotConnected reason="后端不解析 IP 归属地，也没有 GeoIP 数据源。" />
+              </div>
+              <div class="flex items-center justify-between gap-space-sm">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">全局请求唯一 ID</span>
+                <NotConnected reason="主链路不生成请求级追踪 ID；此处仅持久化了 SQLite 自增 id。" />
+              </div>
+              <div class="flex items-center justify-between gap-space-sm">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">耗时分解</span>
+                <NotConnected reason="只记录单次总耗时，未拆分检定与转发阶段。" />
+              </div>
+              <div class="flex items-center justify-between gap-space-sm">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">Token 估算与风险级</span>
+                <NotConnected reason="后端不统计 Token，也不对记录做风险分级。" />
+              </div>
+              <div class="flex items-center justify-between gap-space-sm">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">处置规则矩阵</span>
+                <NotConnected reason="判定由单一阈值产生，没有命名规则与规则链。" />
+              </div>
+              <div class="flex items-center justify-between gap-space-sm">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">完整原始请求体</span>
+                <NotConnected reason="按设计不持久化原始载荷，仅保留截断后的送检摘要。" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 原型中的操作：后端无支撑，不提供可执行按钮 -->
+        <div class="px-space-md py-space-sm border-t border-hairline flex flex-col gap-space-xs">
+          <span class="text-caption-2 font-caption-2 text-outline">
+            加入黑名单、重放测试无对应后端接口，因此不提供操作入口；如需封禁某来源，可调低阈值或在审计记录中定位后于运维侧处理。
+          </span>
+        </div>
+      </aside>
+    </Transition>
+
+    <!-- 抽屉遮罩 -->
+    <Transition
+      enter-active-class="transition-opacity duration-200"
+      enter-from-class="opacity-0"
+      leave-active-class="transition-opacity duration-150"
+      leave-to-class="opacity-0"
+    >
+      <div v-if="selected" class="fixed inset-0 top-16 bg-black/40 z-30" @click="closeDetail"></div>
+    </Transition>
+  </div>
+</template>

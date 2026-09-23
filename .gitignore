@@ -22,6 +22,9 @@
 /.claude/
 /.agents/
 /.codex/
+
+# 前端工程依赖（构建产物 web/dist 提交入库，源码在 web/src）
+/web/node_modules/
 # >>> Comet managed project state >>>
 !/.comet/
 /.comet/*

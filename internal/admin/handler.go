@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +27,7 @@ func New(store *config.Store, webFS fs.FS) *Handler {
 	h := &Handler{
 		store: store,
 		sess:  newSessions(12 * time.Hour),
-		ui:    http.FileServer(http.FS(webFS)),
+		ui:    spaFileServer(webFS),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/login", h.login)
@@ -251,15 +252,87 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 	if hours <= 0 {
 		hours = 24
 	}
-	st, err := h.store.StatsSince(time.Now().Add(-time.Duration(hours) * time.Hour))
+	now := time.Now()
+	since := now.Add(-time.Duration(hours) * time.Hour)
+	st, err := h.store.StatsSince(since)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
 		return
 	}
-	writeJSON(w, http.StatusOK, st)
+	bucketSeconds := config.BucketSeconds(hours)
+	series, err := h.store.StatsSeries(since, now, bucketSeconds)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
+		return
+	}
+	hist, err := h.store.ScoreHistogram(since)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
+		return
+	}
+	// The existing aggregate fields keep their names and meaning; everything
+	// below is additive, so older clients of this endpoint are unaffected.
+	writeJSON(w, http.StatusOK, struct {
+		config.Stats
+		BucketSeconds int                 `json:"bucket_seconds"`
+		Series        []config.StatBucket `json:"series"`
+		ScoreBuckets  []int64             `json:"score_buckets"`
+		Unscored      int64               `json:"unscored"`
+	}{
+		Stats:         st,
+		BucketSeconds: bucketSeconds,
+		Series:        series,
+		ScoreBuckets:  hist.Counts,
+		Unscored:      hist.Unscored,
+	})
 }
 
 // --- helpers ---
+
+// spaFileServer serves the embedded console and falls back to index.html for
+// GET/HEAD paths that name no real file. The console is a vue-router
+// history-mode SPA, so deep links such as /audit or /settings must reach the app
+// rather than a 404 from a plain file server.
+//
+// The fallback deliberately excludes /api/: an unknown API path is a real 404,
+// not a page (the mux routes every registered /api/ handler before this one, so
+// only unregistered ones get here).
+func spaFileServer(webFS fs.FS) http.Handler {
+	files := http.FileServer(http.FS(webFS))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			files.ServeHTTP(w, r)
+			return
+		}
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name == "api" || strings.HasPrefix(name, "api/") {
+			http.NotFound(w, r)
+			return
+		}
+		if name != "" {
+			if info, err := fs.Stat(webFS, name); err == nil && !info.IsDir() {
+				files.ServeHTTP(w, r)
+				return
+			}
+		}
+		serveIndex(w, r, webFS)
+	})
+}
+
+func serveIndex(w http.ResponseWriter, r *http.Request, webFS fs.FS) {
+	body, err := fs.ReadFile(webFS, "index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		return
+	}
+	_, _ = w.Write(body)
+}
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

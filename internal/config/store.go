@@ -432,3 +432,117 @@ func (s *Store) StatsSince(since time.Time) (Stats, error) {
 	}
 	return st, rows.Err()
 }
+
+// BucketSeconds derives the trend-series bucket size from the requested window.
+// It is a pure function of hours, so the granularity is reproducible and is
+// returned to clients rather than guessed by them. The steps keep the point
+// count of a series bounded to roughly 100 regardless of the window.
+func BucketSeconds(hours int) int {
+	switch {
+	case hours <= 6:
+		return 5 * 60 // 5m
+	case hours <= 24:
+		return 15 * 60 // 15m
+	case hours <= 72:
+		return 60 * 60 // 1h
+	case hours <= 168:
+		return 3 * 60 * 60 // 3h
+	default:
+		return 24 * 60 * 60 // 1d
+	}
+}
+
+// StatsSeries returns one StatBucket per bucket spanning [since, until], oldest
+// first. Buckets are aligned to the bucket boundary (so consecutive queries
+// agree on bucket edges) and those without matching rows are emitted with zero
+// counts, which keeps the returned series continuous: callers can plot it
+// directly without filling gaps themselves.
+//
+// The first bucket starts at the boundary at or before `since`, so when `since`
+// is not itself on a boundary that leading bucket covers a fraction of a bucket
+// before the window. The rows queried are still bounded by `since`, so the sum
+// over the series always equals the decision totals of the same window.
+func (s *Store) StatsSeries(since, until time.Time, bucketSeconds int) ([]StatBucket, error) {
+	if bucketSeconds <= 0 {
+		bucketSeconds = BucketSeconds(24)
+	}
+	step := int64(bucketSeconds) * 1000
+	sinceMS := since.UnixMilli()
+	untilMS := until.UnixMilli()
+	if untilMS < sinceMS {
+		return []StatBucket{}, nil
+	}
+	start := sinceMS - sinceMS%step // floor to the bucket boundary (ms are positive)
+	count := int((untilMS-start)/step) + 1
+
+	series := make([]StatBucket, count)
+	for i := range series {
+		series[i].TS = start + int64(i)*step
+	}
+
+	rows, err := s.db.Query(
+		`SELECT ts, decision FROM logs WHERE ts>=? AND ts<=?`,
+		sinceMS, untilMS)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ts int64
+		var decision string
+		if err := rows.Scan(&ts, &decision); err != nil {
+			return nil, err
+		}
+		idx := int((ts - start) / step)
+		if idx < 0 || idx >= len(series) {
+			continue
+		}
+		b := &series[idx]
+		b.Total++
+		switch decision {
+		case "allow":
+			b.Allowed++
+		case "block":
+			b.Blocked++
+		}
+	}
+	return series, rows.Err()
+}
+
+// ScoreHistogram buckets the risk score of every evaluated record in the window
+// (decision allow/block/error — "skip" records were never sent to JEV) into
+// ScoreSlots equal slots of 0.2, plus a count of evaluated records carrying no
+// score at all. Counting evaluated rather than blocked-only records matters:
+// a block is just "score on one side of the threshold", so a blocked-only
+// histogram collapses into a single slot and shows nothing.
+func (s *Store) ScoreHistogram(since time.Time) (ScoreHistogram, error) {
+	h := ScoreHistogram{Counts: make([]int64, ScoreSlots)}
+	rows, err := s.db.Query(
+		`SELECT CASE
+			WHEN score IS NULL THEN -1
+			WHEN score < 0.2 THEN 0
+			WHEN score < 0.4 THEN 1
+			WHEN score < 0.6 THEN 2
+			WHEN score < 0.8 THEN 3
+			ELSE 4
+		 END AS slot, COUNT(*)
+		 FROM logs WHERE ts>=? AND decision IN ('allow','block','error') GROUP BY slot`,
+		since.UnixMilli())
+	if err != nil {
+		return h, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var slot int
+		var n int64
+		if err := rows.Scan(&slot, &n); err != nil {
+			return h, err
+		}
+		if slot < 0 || slot >= ScoreSlots {
+			h.Unscored += n
+			continue
+		}
+		h.Counts[slot] = n
+	}
+	return h, rows.Err()
+}
