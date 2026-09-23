@@ -4,6 +4,7 @@
 # Windows 上覆盖正在运行的二进制时留下的备份（gateway.exe~）
 /gateway.exe~
 /out/
+/out/
 
 # 本地数据 / 数据库
 /data/

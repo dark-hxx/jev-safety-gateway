@@ -193,6 +193,41 @@ curl -i http://localhost:8080/post \
 - **一直 error / fail-open 放行** → 多半是 JEV 密钥无效或网络不通，看网关终端日志 `jev evaluation error`。
 - **想临时全放行** → 关掉「启用过滤」总开关。
 
+## 本地 test 打包（Windows）
+
+`scripts\build-local-test.ps1` 一条命令完成前端构建、后端构建与打包，产出可整包拷到测试机运行的目录包与 zip。
+
+```powershell
+.\scripts\build-local-test.ps1                 # 前端 + 后端 → out\local-test\ + zip
+.\scripts\build-local-test.ps1 -SkipFrontend   # 只构建后端（前端沿用仓库已提交产物）
+.\scripts\build-local-test.ps1 -Offline        # 不联网：缺少 web\node_modules 时直接报错
+```
+
+也可以直接双击 `scripts\build-local-test.cmd`。
+
+| 参数 | 说明 |
+| --- | --- |
+| `-OutputDir <路径>` | 输出目录，默认 `out\local-test`，必须位于仓库内 |
+| `-SkipFrontend` | 跳过前端构建 |
+| `-SkipBackend` | 跳过后端构建（不能与 `-SkipFrontend` 同时使用） |
+| `-Offline` | 不访问网络，缺少前端依赖时报错退出 |
+| `-NoZip` | 不生成 zip |
+| `-Clean` | 构建前清空输出目录 |
+
+产物结构：
+
+```
+out\local-test\
+  gateway.exe        Go 后端二进制，管理控制台前端经 //go:embed 内嵌
+  .env               由 .env.example 生成的初始化配置，需填写上游地址与密钥
+  start-gateway.ps1  启动脚本（读取同目录 .env，数据库默认 data\gateway.db）
+  stop-gateway.ps1   停止脚本（按 gateway.pid 或进程路径匹配停止）
+  README.txt         包内使用说明（含构建时间、提交号与前端状态）
+out\jev-gateway-local-test-<日期>-<短提交>.zip
+```
+
+在测试机上：解压 → 编辑 `.env` → 运行 `.\start-gateway.ps1` → 浏览器打开 `http://127.0.0.1:8081` 完成首次配置。
+
 ## 项目结构
 
 ```
