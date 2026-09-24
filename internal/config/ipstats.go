@@ -38,7 +38,7 @@ const (
 // The summary is computed over every distinct IP in the window; only the
 // returned slice is limited. Rows with no IP (a skip logged before the client
 // was known) are excluded, mirroring LogModels' handling of empty model values.
-func (s *Store) IPStats(since time.Time, limit int) ([]IPStat, IPStatsSummary, error) {
+func (s *Store) IPStats(since time.Time, limit int, geo GeoResolver) ([]IPStat, IPStatsSummary, []GeoBucket, []ASNBucket, error) {
 	if limit <= 0 {
 		limit = ipStatsDefaultLimit
 	}
@@ -58,7 +58,7 @@ func (s *Store) IPStats(since time.Time, limit int) ([]IPStat, IPStatsSummary, e
 			MIN(ts), MAX(ts)
 		 FROM logs WHERE ts>=? AND ip<>'' GROUP BY ip`, sinceMS)
 	if err != nil {
-		return nil, IPStatsSummary{}, err
+		return nil, IPStatsSummary{}, nil, nil, err
 	}
 	defer rows.Close()
 
@@ -66,6 +66,12 @@ func (s *Store) IPStats(since time.Time, limit int) ([]IPStat, IPStatsSummary, e
 		stats   []IPStat
 		summary IPStatsSummary
 	)
+	// GeoIP enrichment is optional and off the hot path (this is the admin query).
+	// When enabled we resolve each distinct IP once, reuse the result for both the
+	// per-IP fields and the country/ASN aggregates.
+	doGeo := geo != nil && (geo.CountryEnabled() || geo.ASNEnabled())
+	countryAgg := map[string]*GeoBucket{}
+	asnAgg := map[uint]*ASNBucket{}
 	for rows.Next() {
 		var (
 			st                 IPStat
@@ -74,7 +80,7 @@ func (s *Store) IPStats(since time.Time, limit int) ([]IPStat, IPStatsSummary, e
 		if err := rows.Scan(&st.IP, &st.Total, &st.Allowed, &st.Blocked,
 			&st.Skipped, &st.Errors, &st.Scored, &avgScore, &minScore,
 			&st.FirstSeen, &st.LastSeen); err != nil {
-			return nil, IPStatsSummary{}, err
+			return nil, IPStatsSummary{}, nil, nil, err
 		}
 		if avgScore.Valid {
 			v := avgScore.Float64
@@ -99,10 +105,35 @@ func (s *Store) IPStats(since time.Time, limit int) ([]IPStat, IPStatsSummary, e
 		case "high":
 			summary.High++
 		}
+		if doGeo {
+			info, _ := geo.Lookup(st.IP)
+			st.Country = info.CountryISO
+			st.CountryName = info.CountryName
+			st.ASN = info.ASN
+			st.ASNOrg = info.ASNOrg
+			if geo.CountryEnabled() {
+				b := countryAgg[info.CountryISO]
+				if b == nil {
+					b = &GeoBucket{Country: info.CountryISO, Name: info.CountryName}
+					countryAgg[info.CountryISO] = b
+				}
+				b.Total += st.Total
+				b.Blocked += st.Blocked
+			}
+			if geo.ASNEnabled() {
+				b := asnAgg[info.ASN]
+				if b == nil {
+					b = &ASNBucket{ASN: info.ASN, Org: info.ASNOrg}
+					asnAgg[info.ASN] = b
+				}
+				b.Total += st.Total
+				b.Blocked += st.Blocked
+			}
+		}
 		stats = append(stats, st)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, IPStatsSummary{}, err
+		return nil, IPStatsSummary{}, nil, nil, err
 	}
 
 	// Most dangerous first; ties broken by raw block count, then recency, then IP
@@ -125,9 +156,69 @@ func (s *Store) IPStats(since time.Time, limit int) ([]IPStat, IPStatsSummary, e
 	}
 
 	if err := s.attachLastReason(stats, sinceMS); err != nil {
-		return nil, IPStatsSummary{}, err
+		return nil, IPStatsSummary{}, nil, nil, err
 	}
-	return stats, summary, nil
+	return stats, summary, topGeoBuckets(countryAgg, geo), topASNBuckets(asnAgg, geo), nil
+}
+
+// Bucket sizing for the geo/ASN panels: enough rows to be useful, bounded so the
+// payload stays small.
+const (
+	geoBucketLimit = 12
+	asnBucketLimit = 15
+)
+
+// topGeoBuckets returns the country aggregates sorted by volume (blocks, then
+// ISO for stable ties), capped at geoBucketLimit. It returns nil when the
+// country dimension is not enabled, so the API omits the panel rather than
+// showing an empty one.
+func topGeoBuckets(agg map[string]*GeoBucket, geo GeoResolver) []GeoBucket {
+	if geo == nil || !geo.CountryEnabled() {
+		return nil
+	}
+	out := make([]GeoBucket, 0, len(agg))
+	for _, b := range agg {
+		out = append(out, *b)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Total != b.Total {
+			return a.Total > b.Total
+		}
+		if a.Blocked != b.Blocked {
+			return a.Blocked > b.Blocked
+		}
+		return a.Country < b.Country
+	})
+	if len(out) > geoBucketLimit {
+		out = out[:geoBucketLimit]
+	}
+	return out
+}
+
+// topASNBuckets is the ASN counterpart of topGeoBuckets.
+func topASNBuckets(agg map[uint]*ASNBucket, geo GeoResolver) []ASNBucket {
+	if geo == nil || !geo.ASNEnabled() {
+		return nil
+	}
+	out := make([]ASNBucket, 0, len(agg))
+	for _, b := range agg {
+		out = append(out, *b)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Total != b.Total {
+			return a.Total > b.Total
+		}
+		if a.Blocked != b.Blocked {
+			return a.Blocked > b.Blocked
+		}
+		return a.ASN < b.ASN
+	})
+	if len(out) > asnBucketLimit {
+		out = out[:asnBucketLimit]
+	}
+	return out
 }
 
 // ipDanger computes a deterministic 0–1 danger rating for one IP:

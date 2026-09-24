@@ -59,7 +59,7 @@ func TestIPStatsDangerRankingLevelsAndSummary(t *testing.T) {
 	addIPRows(s, "", 3, "block", f(0.0), inWin, "no-ip")
 	s.AddLog(LogEntry{TS: since.Add(-time.Hour), IP: "198.51.100.9", Decision: "block", Score: f(0.0), Reason: "too-old"})
 
-	items, summary, err := s.IPStats(since, 0)
+	items, summary, _, _, err := s.IPStats(since, 0, nil)
 	if err != nil {
 		t.Fatalf("IPStats: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestIPStatsLimitTruncatesListNotSummary(t *testing.T) {
 		s.AddLog(LogEntry{TS: inWin, IP: ip, Decision: "block", Score: f(0.0)})
 	}
 
-	items, summary, err := s.IPStats(since, 2)
+	items, summary, _, _, err := s.IPStats(since, 2, nil)
 	if err != nil {
 		t.Fatalf("IPStats: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestIPStatsLimitTruncatesListNotSummary(t *testing.T) {
 	}
 
 	// limit<=0 falls back to the default and returns everything present here.
-	all, _, err := s.IPStats(since, 0)
+	all, _, _, _, err := s.IPStats(since, 0, nil)
 	if err != nil {
 		t.Fatalf("IPStats(limit=0): %v", err)
 	}
@@ -220,5 +220,152 @@ func TestIPDangerAndLevelUnit(t *testing.T) {
 		if got := dangerLevel(c.d); got != c.want {
 			t.Errorf("dangerLevel(%v) = %q, want %q", c.d, got, c.want)
 		}
+	}
+}
+
+// fakeGeo is a deterministic GeoResolver for the aggregation tests: it maps a few
+// public IPs to fixed country/ASN attributions and returns ok=false for anything
+// else (private ranges, unknown IPs), exactly like the real resolver does for an
+// IP neither database can attribute. enableCountry/enableASN model an operator who
+// configured only one of the two databases.
+type fakeGeo struct {
+	enableCountry bool
+	enableASN     bool
+	table         map[string]GeoInfo
+}
+
+func (g fakeGeo) CountryEnabled() bool { return g.enableCountry }
+func (g fakeGeo) ASNEnabled() bool     { return g.enableASN }
+func (g fakeGeo) Lookup(ip string) (GeoInfo, bool) {
+	info, ok := g.table[ip]
+	return info, ok
+}
+
+// GatewayLocation is always unset here: the deployment coordinate is not part of
+// the IP aggregation IPStats performs, so the aggregation tests have no reason to
+// declare one. (The admin handler test covers the response field.)
+func (g fakeGeo) GatewayLocation() (float64, float64, bool) { return 0, 0, false }
+
+// With a resolver wired, IPStats must fill each IP's country/ASN and return the
+// country and ASN buckets aggregated over the window, volume-sorted and top-N
+// capped. Unattributed IPs fall into the ISO="" / ASN=0 bucket without polluting
+// the named rankings, and a resolver with only one dimension enabled returns only
+// that dimension's buckets.
+func TestIPStatsGeoAggregation(t *testing.T) {
+	s := openTestStore(t)
+	now := time.Now()
+	since := now.Add(-time.Hour)
+	inWin := now.Add(-10 * time.Second)
+
+	// Two US IPs (same country, different ASN), one DE IP, one private IP the
+	// resolver cannot attribute.
+	addIPRows(s, "203.0.113.10", 6, "block", f(0.1), inWin, "us-a")
+	addIPRows(s, "203.0.113.11", 4, "allow", f(0.9), inWin, "us-b")
+	addIPRows(s, "198.51.100.20", 5, "block", f(0.2), inWin, "de")
+	addIPRows(s, "10.0.0.5", 3, "allow", f(0.9), inWin, "private")
+
+	geo := fakeGeo{
+		enableCountry: true,
+		enableASN:     true,
+		table: map[string]GeoInfo{
+			"203.0.113.10":  {CountryISO: "US", CountryName: "United States", ASN: 64500, ASNOrg: "Alpha"},
+			"203.0.113.11":  {CountryISO: "US", CountryName: "United States", ASN: 64501, ASNOrg: "Beta"},
+			"198.51.100.20": {CountryISO: "DE", CountryName: "Germany", ASN: 64500, ASNOrg: "Alpha"},
+			// 10.0.0.5 intentionally absent -> ok=false.
+		},
+	}
+
+	items, _, geoBuckets, asnBuckets, err := s.IPStats(since, 0, geo)
+	if err != nil {
+		t.Fatalf("IPStats: %v", err)
+	}
+
+	// Per-IP enrichment is filled from the resolver; the unattributed IP stays blank.
+	byIP := map[string]IPStat{}
+	for _, it := range items {
+		byIP[it.IP] = it
+	}
+	if it := byIP["203.0.113.10"]; it.Country != "US" || it.ASN != 64500 || it.ASNOrg != "Alpha" {
+		t.Errorf("203.0.113.10 enrichment = %q/%d/%q, want US/64500/Alpha", it.Country, it.ASN, it.ASNOrg)
+	}
+	if it := byIP["10.0.0.5"]; it.Country != "" || it.ASN != 0 {
+		t.Errorf("private IP enrichment = %q/%d, want empty/0 (unattributed)", it.Country, it.ASN)
+	}
+
+	// Country buckets: US = 6+4 events / 6 blocks, DE = 5/5, unknown ("") = 3/0.
+	// Volume-sorted: US (10) > DE (5) > unknown (3).
+	if len(geoBuckets) != 3 {
+		t.Fatalf("got %d country buckets, want 3 (US, DE, unknown): %+v", len(geoBuckets), geoBuckets)
+	}
+	if b := geoBuckets[0]; b.Country != "US" || b.Total != 10 || b.Blocked != 6 {
+		t.Errorf("country[0] = %+v, want US total=10 blocked=6", b)
+	}
+	if b := geoBuckets[1]; b.Country != "DE" || b.Total != 5 || b.Blocked != 5 {
+		t.Errorf("country[1] = %+v, want DE total=5 blocked=5", b)
+	}
+	if b := geoBuckets[2]; b.Country != "" || b.Total != 3 {
+		t.Errorf("country[2] = %+v, want unknown total=3", b)
+	}
+
+	// ASN buckets: 64500 = 6(US-a)+5(DE) events / 11 total 11 blocks, 64501 = 4/0,
+	// 0 (unattributed) = 3/0. Volume-sorted: 64500 (11) > 64501 (4) > 0 (3).
+	if len(asnBuckets) != 3 {
+		t.Fatalf("got %d ASN buckets, want 3: %+v", len(asnBuckets), asnBuckets)
+	}
+	if b := asnBuckets[0]; b.ASN != 64500 || b.Total != 11 || b.Blocked != 11 {
+		t.Errorf("asn[0] = %+v, want 64500 total=11 blocked=11", b)
+	}
+	if b := asnBuckets[1]; b.ASN != 64501 || b.Total != 4 || b.Blocked != 0 {
+		t.Errorf("asn[1] = %+v, want 64501 total=4 blocked=0", b)
+	}
+	if b := asnBuckets[2]; b.ASN != 0 || b.Total != 3 {
+		t.Errorf("asn[2] = %+v, want unattributed ASN=0 total=3", b)
+	}
+}
+
+// A resolver with only the country database enabled must return country buckets
+// but a nil ASN slice (so the API omits that panel), and vice versa.
+func TestIPStatsGeoSingleDimension(t *testing.T) {
+	s := openTestStore(t)
+	now := time.Now()
+	since := now.Add(-time.Hour)
+	inWin := now.Add(-10 * time.Second)
+	addIPRows(s, "203.0.113.10", 3, "block", f(0.1), inWin, "us")
+
+	geo := fakeGeo{
+		enableCountry: true,
+		enableASN:     false,
+		table:         map[string]GeoInfo{"203.0.113.10": {CountryISO: "US", CountryName: "United States", ASN: 64500}},
+	}
+	_, _, geoBuckets, asnBuckets, err := s.IPStats(since, 0, geo)
+	if err != nil {
+		t.Fatalf("IPStats: %v", err)
+	}
+	if len(geoBuckets) != 1 {
+		t.Errorf("country enabled: got %d country buckets, want 1", len(geoBuckets))
+	}
+	if asnBuckets != nil {
+		t.Errorf("ASN disabled: asnBuckets = %+v, want nil", asnBuckets)
+	}
+}
+
+// With no resolver (nil), IPStats returns no buckets and leaves per-IP geo fields
+// blank — the pre-Phase-3 behaviour, so an install without GeoIP is unaffected.
+func TestIPStatsNilGeo(t *testing.T) {
+	s := openTestStore(t)
+	now := time.Now()
+	since := now.Add(-time.Hour)
+	inWin := now.Add(-10 * time.Second)
+	addIPRows(s, "203.0.113.10", 3, "block", f(0.1), inWin, "us")
+
+	items, _, geoBuckets, asnBuckets, err := s.IPStats(since, 0, nil)
+	if err != nil {
+		t.Fatalf("IPStats: %v", err)
+	}
+	if geoBuckets != nil || asnBuckets != nil {
+		t.Errorf("nil geo: buckets = %+v/%+v, want nil/nil", geoBuckets, asnBuckets)
+	}
+	if len(items) == 1 && (items[0].Country != "" || items[0].ASN != 0) {
+		t.Errorf("nil geo: per-IP enrichment = %q/%d, want empty/0", items[0].Country, items[0].ASN)
 	}
 }

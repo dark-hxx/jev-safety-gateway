@@ -43,8 +43,10 @@ type Server struct {
 }
 
 // New constructs both HTTP servers. info may be nil; when it is not, Run
-// populates its addresses with the endpoints that actually came up.
-func New(store *config.Store, webFS fs.FS, proxyAddr, adminAddr string, info *admin.Info) *Server {
+// populates its addresses with the endpoints that actually came up. geo may be
+// nil (no GeoIP configured); it is handed to the admin handler for the IP
+// analytics geo/ASN enrichment and is never consulted on the proxy hot path.
+func New(store *config.Store, webFS fs.FS, proxyAddr, adminAddr string, info *admin.Info, geo config.GeoResolver) *Server {
 	client := jev.New(keyAdapter{store})
 
 	proxyHandler := proxy.New(store, client)
@@ -55,7 +57,7 @@ func New(store *config.Store, webFS fs.FS, proxyAddr, adminAddr string, info *ad
 	})
 	proxyMux.Handle("/", proxyHandler)
 
-	adminHandler := admin.New(store, webFS, info, proxyHandler.Abuse())
+	adminHandler := admin.New(store, webFS, info, proxyHandler.Abuse(), geo)
 
 	return &Server{
 		info: info,

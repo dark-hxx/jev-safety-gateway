@@ -49,18 +49,22 @@ type Handler struct {
 	mux   *http.ServeMux
 	info  *Info
 	bans  BanSnapshot
+	geo   config.GeoResolver
 }
 
 // New builds the admin handler. webFS should contain index.html at its root.
 // info may be nil, in which case /api/version reports the running Go version
 // and zero addresses rather than failing. bans may be nil (no live bans shown).
-func New(store *config.Store, webFS fs.FS, info *Info, bans BanSnapshot) *Handler {
+// geo may be nil (no GeoIP configured), in which case the IP analytics geo/ASN
+// panels report themselves as not connected.
+func New(store *config.Store, webFS fs.FS, info *Info, bans BanSnapshot, geo config.GeoResolver) *Handler {
 	h := &Handler{
 		store: store,
 		sess:  newSessions(12 * time.Hour),
 		ui:    spaFileServer(webFS),
 		info:  info,
 		bans:  bans,
+		geo:   geo,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/login", h.login)
@@ -472,26 +476,61 @@ func (h *Handler) ipStats(w http.ResponseWriter, r *http.Request) {
 	since := now.Add(-time.Duration(hours) * time.Hour)
 
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, summary, err := h.store.IPStats(since, limit)
+	items, summary, geoBuckets, asnBuckets, err := h.store.IPStats(since, limit, h.geo)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
 		return
 	}
 	bans := h.bannedList(now)
 
+	// GeoEnabled/ASNEnabled tell the console which panels have a database behind
+	// them; the buckets are omitted (nil → absent) when their dimension is off, so
+	// the page shows "not connected" rather than an empty ranking.
+	geoEnabled := h.geo != nil && h.geo.CountryEnabled()
+	asnEnabled := h.geo != nil && h.geo.ASNEnabled()
+
+	// The declared deployment coordinate is reported separately from the buckets
+	// and omitted when unset, so the console can tell "no hub configured" from
+	// "hub at 0,0" (a real place in the Gulf of Guinea). The nil check is on the
+	// interface: a nil GeoResolver means no GeoIP at all, and calling through it
+	// would panic rather than report "unset".
+	var gateway *gatewayLocation
+	if h.geo != nil {
+		if lat, lon, ok := h.geo.GatewayLocation(); ok {
+			gateway = &gatewayLocation{Lat: lat, Lon: lon}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, struct {
 		config.IPStatsSummary
-		Hours    int             `json:"hours"`
-		Items    []config.IPStat `json:"items"`
-		Bans     []banEntry      `json:"bans"`
-		BanCount int             `json:"ban_count"`
+		Hours      int                `json:"hours"`
+		Items      []config.IPStat    `json:"items"`
+		Bans       []banEntry         `json:"bans"`
+		BanCount   int                `json:"ban_count"`
+		GeoEnabled bool               `json:"geo_enabled"`
+		ASNEnabled bool               `json:"asn_enabled"`
+		Gateway    *gatewayLocation   `json:"gateway,omitempty"`
+		Geo        []config.GeoBucket `json:"geo,omitempty"`
+		ASN        []config.ASNBucket `json:"asn,omitempty"`
 	}{
 		IPStatsSummary: summary,
 		Hours:          hours,
 		Items:          items,
 		Bans:           bans,
 		BanCount:       len(bans),
+		GeoEnabled:     geoEnabled,
+		ASNEnabled:     asnEnabled,
+		Gateway:        gateway,
+		Geo:            geoBuckets,
+		ASN:            asnBuckets,
 	})
+}
+
+// gatewayLocation is the operator-declared coordinate where this gateway runs,
+// in decimal degrees, for the origin map's central node.
+type gatewayLocation struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
 }
 
 // banEntry is one live temporary ban as reported to the console.

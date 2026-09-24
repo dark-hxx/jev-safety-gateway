@@ -191,6 +191,33 @@ export interface IPStat {
   danger: number
   /** 危险分档：crit / high / med / low。 */
   level: string
+  /** ISO-3166-1 alpha-2 国家码（如 "US"）；未配置 GeoIP 或未命中时省略。 */
+  country?: string
+  /** 国家英文名；同 `country` 一起出现。 */
+  country_name?: string
+  /** 自治系统号；未配置 ASN 库或未命中时省略。 */
+  asn?: number
+  /** 自治系统组织名；同 `asn` 一起出现。 */
+  asn_org?: string
+}
+
+/**
+ * 与 internal/config/models.go 的 `GeoBucket` 对应：窗口内按国家聚合的事件/拦截量。
+ * `country` 为 ISO 国家码，空串表示未解析/内网 IP（归入「未知」一行）。
+ */
+export interface GeoBucket {
+  country: string
+  name: string
+  total: number
+  blocked: number
+}
+
+/** 与 internal/config/models.go 的 `ASNBucket` 对应：窗口内按 ASN 聚合的事件/拦截量。 */
+export interface ASNBucket {
+  asn: number
+  org: string
+  total: number
+  blocked: number
 }
 
 /**
@@ -227,6 +254,21 @@ export interface IpStatsResponse extends IPStatsSummary {
   items: IPStat[] | null
   bans: BanEntry[]
   ban_count: number
+  /** 是否配置了国家库；为假时前端保持「未接入」占位，`geo` 省略。 */
+  geo_enabled?: boolean
+  /** 是否配置了 ASN 库；为假时前端保持「未接入」占位，`asn` 省略。 */
+  asn_enabled?: boolean
+  /**
+   * 本网关的部署坐标（JEV_GATEWAY_LAT / JEV_GATEWAY_LON，十进制度），供来源图把中心
+   * 节点落在服务真实位置。运维未声明时整个字段省略——前端据此不出中心节点与弧线，
+   * 而不是把网关钉在一个编造的坐标上。（0,0 是几内亚湾的真实坐标，所以「未声明」必须
+   * 由字段是否存在表达，不能靠数值是否为 0 判断。）
+   */
+  gateway?: { lat: number; lon: number }
+  /** 按事件量降序的国家聚合排行（top-N）；维度未启用时省略。 */
+  geo?: GeoBucket[]
+  /** 按事件量降序的 ASN 聚合排行（top-N）；维度未启用时省略。 */
+  asn?: ASNBucket[]
 }
 
 /**

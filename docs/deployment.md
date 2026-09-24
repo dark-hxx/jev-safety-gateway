@@ -323,6 +323,53 @@ Get-Content "$env:ProgramData\jev-safety-gateway\logs\gateway.log" -Wait -Tail 5
 
 ---
 
+## 可选 GeoIP（国家 / ASN 归属）
+
+IP 风险分析页的「全球与区域威胁来源分布」「攻击特征与 ASN 映射」两块面板，以及危险榜 /
+实时封禁列表的行内国旗，需要本地 GeoIP 数据库才会出数据；**未配置时面板保持「未接入」占位，
+其余功能不受影响**。
+
+约束与定位：
+
+- **不随发行物捆绑**。GeoLite2 有其许可条款，且本项目坚持离线，运营方自备数据库文件。
+  从 MaxMind 免费账号下载 `GeoLite2-Country.mmdb` 与 `GeoLite2-ASN.mmdb`（两者独立，
+  只配一个也能工作，另一维度保持未接入）。
+- **纯本地只读、不上热路径**。归属解析只发生在管理口 `/api/stats/ip` 的聚合查询里，
+  代理转发（`proxy.ServeHTTP`）从不调用它，运行时也不联网。
+- **缺失即降级**。路径为空、文件不存在或打不开 → 该维度关闭、启动不失败、面板保持未接入。
+
+用两个**基础设施环境变量**开启（每次启动读取，与 `JEV_DB_PATH` 同类，**不写入数据库、
+控制台里改不了**）：
+
+| 变量 | 指向 |
+|---|---|
+| `JEV_GEOIP_COUNTRY_DB` | 本地 `GeoLite2-Country.mmdb` 的路径 |
+| `JEV_GEOIP_ASN_DB` | 本地 `GeoLite2-ASN.mmdb` 的路径 |
+| `JEV_GATEWAY_LAT` / `JEV_GATEWAY_LON` | 可选：本网关的部署坐标（十进制度，WGS84），见下 |
+
+`JEV_GATEWAY_LAT` / `JEV_GATEWAY_LON` 只用来源图上的**中心节点**：各来源标点向它汇聚。
+网关自身的公网出口 IP 离线不可知（可能藏在 nginx 或 NAT 之后），所以这个位置只能由运维
+**声明**，不做推断。两个都必须给且落在纬度 −90..90、经度 −180..180 才算声明；只给一个、
+给不出数或超出范围会被忽略并打一行日志，等同于没配（图里只画来源标点，不画中心节点与
+弧线，也不把网关钉在 0,0 这个真实坐标上）。例：上海约 `31.23` / `121.47`，法兰克福约
+`50.11` / `8.68`。
+
+三平台落地：
+
+- **Docker / compose**：把数据库目录只读挂进容器，再让 env 指向容器内路径。
+  `docker-compose.yml` 已备注示例：`volumes:` 放开 `./geoip:/geoip:ro`，`environment:` 里
+  设 `JEV_GEOIP_COUNTRY_DB=/geoip/GeoLite2-Country.mmdb`、`JEV_GEOIP_ASN_DB=/geoip/GeoLite2-ASN.mmdb`
+  （经 `.env` 的 `${...}` 透传）。
+- **Linux 裸机（systemd）**：在 `/etc/jev-safety-gateway/env` 里填**绝对路径**（见 `env.example` 注释）。
+  若 unit 开了沙箱（`ProtectSystem` / `ReadOnlyPaths`），数据库须放在服务可读的路径下，
+  例如 `/etc/jev-safety-gateway/geoip/`。
+- **Windows 服务**：`install-service.ps1` 的 `-EnvFile` 会把 `KEY=VALUE` 写进服务注册表的
+  `Environment`，两条 GeoIP 变量走同一通道即可，值填绝对路径。
+
+配置后重启进程；启动日志会打印激活了哪几个维度（`geoip: country database active …` /
+`geoip: ASN database active …`，以及声明了部署位置时的 `geoip: gateway location declared at …`），
+未配置或打不开则记为 disabled。
+
 ## 版本号与构建标识
 
 版本号的真源是 **`web/package.json` 的 `version`**，不是 git tag（仓库没有打 tag 的习惯）。

@@ -3,6 +3,7 @@ module jev-safety-gateway
 go 1.23
 
 require (
+	github.com/oschwald/maxminddb-golang v1.13.1
 	golang.org/x/crypto v0.28.0
 	golang.org/x/sys v0.26.0
 	modernc.org/sqlite v1.33.1

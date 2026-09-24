@@ -243,6 +243,15 @@ type IPStat struct {
 	// crit/high/med/low. Both are computed, never stored.
 	Danger float64 `json:"danger"`
 	Level  string  `json:"level"`
+
+	// Country/ASN are filled from an optional GeoIP resolver at aggregation time
+	// (see IPStats). All omitempty: absent when no GeoIP database is configured or
+	// the IP did not resolve (private/unknown), so the console shows nothing rather
+	// than a fabricated value.
+	Country     string `json:"country,omitempty"`      // ISO-3166-1 alpha-2, e.g. "US"
+	CountryName string `json:"country_name,omitempty"` // English display name
+	ASN         uint   `json:"asn,omitempty"`
+	ASNOrg      string `json:"asn_org,omitempty"`
 }
 
 // IPStatsSummary is the KPI header for the IP analytics page: totals across all
@@ -255,6 +264,53 @@ type IPStatsSummary struct {
 	High         int64 `json:"high"`
 	TotalBlocked int64 `json:"total_blocked"`
 	TotalEvents  int64 `json:"total_events"`
+}
+
+// GeoResolver resolves a client IP to its country and ASN. It is implemented by
+// package internal/geoip over optional MaxMind databases and passed into IPStats;
+// a nil resolver means no GeoIP is configured, so the analytics page keeps its
+// "not connected" panels. Defining the interface here (rather than importing
+// geoip) keeps config free of the GeoIP dependency, mirroring BanSnapshot in the
+// admin package. CountryEnabled/ASNEnabled report which dimensions actually have
+// a database open, so a resolver with only one database still works.
+type GeoResolver interface {
+	Lookup(ip string) (GeoInfo, bool)
+	CountryEnabled() bool
+	ASNEnabled() bool
+	// GatewayLocation reports where this gateway is deployed, for the origin
+	// map's central node. ok is false when the operator declared no coordinate,
+	// in which case the map draws origins only — no fabricated hub. This is the
+	// gateway's own location, not a client's: the map's hub/spoke reading comes
+	// from pairing it with Lookup.
+	GatewayLocation() (lat, lon float64, ok bool)
+}
+
+// GeoInfo is one IP's resolved attribution. Fields are zero when the relevant
+// database is absent or the IP did not match (private ranges, unknown).
+type GeoInfo struct {
+	CountryISO    string // ISO-3166-1 alpha-2, e.g. "US"
+	CountryName   string // English name from the database
+	CountryNameZH string // zh-CN name when the database carries it
+	ASN           uint
+	ASNOrg        string
+}
+
+// GeoBucket is the per-country aggregate over the window for the geo panel: how
+// many events and blocks came from each country. Country is the ISO code (""
+// for unresolved/private IPs, grouped under one "unknown" row).
+type GeoBucket struct {
+	Country string `json:"country"`
+	Name    string `json:"name"`
+	Total   int64  `json:"total"`
+	Blocked int64  `json:"blocked"`
+}
+
+// ASNBucket is the per-ASN aggregate over the window for the ASN panel.
+type ASNBucket struct {
+	ASN     uint   `json:"asn"`
+	Org     string `json:"org"`
+	Total   int64  `json:"total"`
+	Blocked int64  `json:"blocked"`
 }
 
 // IPRule is one persisted IP access rule: a manual ban (temporary or permanent),

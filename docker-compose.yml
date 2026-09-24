@@ -22,8 +22,20 @@ services:
       JEV_BASE_URL: "${JEV_BASE_URL:-https://api.typesafe.ai}"
       JEV_API_KEY: "${JEV_API_KEY:-}"                # 初始 JEV 密钥 (可选)
       JEV_ADMIN_PASSWORD: "${JEV_ADMIN_PASSWORD:-}"  # 初始管理员口令 (可选)
+      # 可选 GeoIP 归属 (IP 风险分析页的国家/ASN 排行): 每次启动读取, 非一次性初始化。
+      # 指向容器内路径 (见下方 volumes 的只读挂载示例); 留空则该维度关闭、面板保持未接入。
+      JEV_GEOIP_COUNTRY_DB: "${JEV_GEOIP_COUNTRY_DB:-}"  # 如 /geoip/GeoLite2-Country.mmdb
+      JEV_GEOIP_ASN_DB: "${JEV_GEOIP_ASN_DB:-}"          # 如 /geoip/GeoLite2-ASN.mmdb
+      # 可选: 本网关部署坐标 (十进制度), 只用于来源图中心节点 (各来源向其汇聚)。
+      # 网关自身出口 IP 离线不可知, 只能由部署方声明; 两个都要给且范围合法才算数,
+      # 否则等同于没配 (图里只画来源标点, 不画中心节点与弧线)。
+      JEV_GATEWAY_LAT: "${JEV_GATEWAY_LAT:-}"            # 如 31.23
+      JEV_GATEWAY_LON: "${JEV_GATEWAY_LON:-}"            # 如 121.47
     volumes:
       - jev-safety-gateway-data:/data
+      # 可选: 把运营方自备的 MaxMind 数据库目录只读挂进容器, 再让上面两个 env 指向容器内路径。
+      # GeoLite2 不随镜像捆绑 (许可 + 离线约束), 需自行从 MaxMind 下载。
+      # - ./geoip:/geoip:ro
     # 容器日志默认无限增长，长期运行必须设上限。
     logging:
       driver: json-file

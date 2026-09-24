@@ -5,11 +5,12 @@ import Icon from '../../components/Icon.vue'
 import HintTip from '../../components/HintTip.vue'
 import NotConnected from '../../components/NotConnected.vue'
 import SelectMenu from '../../components/SelectMenu.vue'
+import WorldThreatMap from '../../components/WorldThreatMap.vue'
 import * as api from '../../api'
 import { durationOf, num, pctText, relativeOf, score } from '../../format'
 import { useI18n } from '../../i18n'
 import type { MessageKey } from '../../i18n/zh'
-import type { BanEntry, IPRule, IPStat, IpStatsResponse } from '../../types'
+import type { ASNBucket, BanEntry, GeoBucket, IPRule, IPStat, IpStatsResponse } from '../../types'
 
 /**
  * IP 风险分析与统计。
@@ -24,8 +25,9 @@ import type { BanEntry, IPRule, IPStat, IpStatsResponse } from '../../types'
  *
  * 封禁规则池（手动 / CIDR / 永久封禁 + 白名单）来自 GET/POST/DELETE /api/ip-rules，
  * 与实时 abuse 封禁互补、持久化于 SQLite；白名单优先于封禁但不豁免内容检定。
- * 仅地理 / 区域分布与 ASN 映射仍以 NotConnected 降级（需 GeoIP，后续版本）。
- * 本页只呈现有来源的数字。
+ * 地理 / 区域分布与 ASN 映射为可选的 GeoIP 归属：配置了本地数据库（JEV_GEOIP_*_DB）时
+ * 出排行榜与行内国旗，未配置则保持 NotConnected 占位。全部在管理口查询期离线聚合，
+ * 不触及代理热路径。本页只呈现有来源的数字。
  */
 const router = useRouter()
 const { t } = useI18n()
@@ -115,6 +117,48 @@ const totalBlocked = computed(() => summary.value?.total_blocked ?? 0)
 const totalEvents = computed(() => summary.value?.total_events ?? 0)
 const blockedShare = computed(() => pctText(totalBlocked.value, totalEvents.value))
 const banCount = computed(() => bans.value.length)
+
+// --- 可选 GeoIP 归属分布（仅当后端配置了本地数据库时出数据；否则保持 NotConnected）---
+// geo_enabled / asn_enabled 由后端按「该维度是否有库打开」回报，与是否命中无关；
+// 数组已在后端按事件量降序并 top-N 封顶，前端只做比例条与国旗渲染。
+const geoEnabled = computed(() => summary.value?.geo_enabled ?? false)
+const asnEnabled = computed(() => summary.value?.asn_enabled ?? false)
+const geoBuckets = computed<GeoBucket[]>(() => summary.value?.geo ?? [])
+const asnBuckets = computed<ASNBucket[]>(() => summary.value?.asn ?? [])
+/**
+ * 本网关部署坐标（运维声明的 JEV_GATEWAY_LAT / JEV_GATEWAY_LON）；未声明时为 undefined，
+ * 来源图据此不出中心节点与弧线。该字段与 geo_enabled 独立：它描述「服务在哪跑」，
+ * 而不是「客户端来自哪」。
+ */
+const gatewayLoc = computed(() => summary.value?.gateway)
+/** 比例条以榜首事件量为满刻度，让相对量级一眼可读（拦截量共用同一刻度叠加其上）。 */
+const geoMaxTotal = computed(() => Math.max(1, ...geoBuckets.value.map((b) => b.total)))
+const asnMaxTotal = computed(() => Math.max(1, ...asnBuckets.value.map((b) => b.total)))
+function barPct(v: number, max: number): string {
+  return (max > 0 ? Math.min(100, (v / max) * 100) : 0) + '%'
+}
+
+/**
+ * ISO-3166-1 alpha-2 国家码 → 区域指示符 emoji 国旗（离线、无图片资源）。
+ * 非法 / 空码返回空串，调用方回退到「未知」占位，绝不渲染错误旗帜。
+ */
+function isoToFlag(iso?: string): string {
+  if (!iso || !/^[A-Za-z]{2}$/.test(iso)) return ''
+  const base = 0x1f1e6 // 区域指示符 'A'
+  const cc = iso.toUpperCase()
+  return String.fromCodePoint(base + (cc.charCodeAt(0) - 65), base + (cc.charCodeAt(1) - 65))
+}
+/** ASN 展示名：优先组织名，否则 ASxxxx；未归属（asn=0）走「未知」占位。 */
+function asnLabel(b: ASNBucket): string {
+  if (b.asn === 0) return t('ipa.dist.unknown')
+  return b.org || 'AS' + b.asn
+}
+/** 从危险榜 items 建 ip→国家 的映射，供实时封禁列表复用国旗（封禁项本身不带归属地）。 */
+const countryByIp = computed(() => {
+  const m = new Map<string, string>()
+  for (const it of items.value) if (it.country) m.set(it.ip, it.country)
+  return m
+})
 
 // --- 危险分档样式 ---
 interface LevelStyle {
@@ -389,10 +433,10 @@ function ruleExpiryMs(rule: IPRule): number | null {
         </div>
       </div>
     </section>
-    <!-- 中段：危险来源排行 + 实时封禁 -->
-    <section class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg">
+    <!-- 第二行：危险来源 IP 排行（整行铺满，便于横向浏览与分页） -->
+    <section class="flex flex-col gap-space-lg">
       <!-- 危险来源 IP 排行（items[]，危险度倒序，客户端分页） -->
-      <div class="xl:col-span-8 flex flex-col rounded-2xl bg-surface-container shadow-lg border border-hairline overflow-hidden">
+      <div class="flex flex-col rounded-2xl bg-surface-container shadow-lg border border-hairline overflow-hidden">
         <div class="px-space-md py-space-sm border-b border-hairline flex items-center justify-between flex-wrap gap-space-xs">
           <div class="flex flex-col">
             <div class="flex items-center gap-space-xs">
@@ -423,7 +467,14 @@ function ruleExpiryMs(rule: IPRule): number | null {
                 class="border-t border-hairline hover:bg-surface-container-high/60 transition-colors align-top"
               >
                 <td class="px-space-sm py-2.5 whitespace-nowrap">
-                  <span class="font-code-body text-code-body text-on-surface mono">{{ it.ip }}</span>
+                  <span class="flex items-center gap-1.5">
+                    <span
+                      v-if="isoToFlag(it.country)"
+                      class="text-[15px] leading-none"
+                      :title="it.country_name || it.country"
+                    >{{ isoToFlag(it.country) }}</span>
+                    <span class="font-code-body text-code-body text-on-surface mono">{{ it.ip }}</span>
+                  </span>
                   <span class="block text-caption-2 font-caption-2 text-outline">{{ t('ipa.lastSeen', { v: relOf(it.last_seen) }) }}</span>
                 </td>
                 <td class="px-space-sm py-2.5 whitespace-nowrap">
@@ -519,65 +570,130 @@ function ruleExpiryMs(rule: IPRule): number | null {
           </div>
         </div>
       </div>
-      <!-- 实时封禁沙箱（bans[]，倒计时随每秒墙钟递减） -->
-      <div class="xl:col-span-4 flex flex-col rounded-2xl bg-surface-container shadow-lg border border-hairline overflow-hidden">
-        <div class="px-space-md py-space-sm border-b border-hairline flex items-center justify-between gap-space-xs">
-          <div class="flex flex-col">
-            <div class="flex items-center gap-space-xs">
-              <Icon name="gavel" class="text-tertiary text-[16px]" />
-              <span class="text-title-3 font-title-3 text-on-surface">{{ t('ipa.bans.title') }}</span>
-            </div>
-            <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.bans.sub') }}</span>
-          </div>
-          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-tertiary/15 text-tertiary whitespace-nowrap">
-            {{ t('ipa.bans.count', { n: num(banCount) }) }}
-          </span>
-        </div>
-        <div class="max-h-[28rem] overflow-auto divide-y divide-hairline">
-          <div v-for="b in bans" :key="b.ip" class="flex items-center justify-between gap-space-sm px-space-md py-space-sm">
-            <div class="flex flex-col min-w-0">
-              <span class="font-code-body text-code-body text-on-surface mono truncate">{{ b.ip }}</span>
-              <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.bans.until') }} · {{ untilText(b.until) }}</span>
-            </div>
-            <div class="flex flex-col items-end shrink-0">
-              <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.bans.remain') }}</span>
-              <span class="text-subheadline font-subheadline mono" :class="remainSecOf(b.until) > 0 ? 'text-tertiary' : 'text-outline'">
-                {{ durationOf(remainSecOf(b.until)) }}
-              </span>
-            </div>
-          </div>
-          <div v-if="!bans.length" class="flex flex-col items-center justify-center gap-1.5 py-space-xl px-space-md text-center">
-            <Icon name="shield-check" class="text-secondary text-[24px]" />
-            <span class="text-subheadline font-subheadline text-on-surface-variant">{{ t('ipa.bans.empty') }}</span>
-            <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.bans.emptyHint') }}</span>
-          </div>
-        </div>
-      </div>
     </section>
-    <!-- 地理 / 区域分布与 ASN 映射：需 GeoIP 数据源，后续版本，降级为未接入 -->
-    <section class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg">
+    <!-- 第三行：来源分布（左，整列高）与「实时封禁 + ASN 映射」（右，上下堆叠等高） -->
+    <section class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg items-stretch">
       <div class="xl:col-span-7 flex flex-col gap-space-sm p-space-lg rounded-2xl bg-surface-container shadow-md border border-hairline">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <Icon name="globe" class="text-outline text-[20px]" />
-            <span class="text-title-3 font-title-3 text-on-surface">{{ t('ipa.geo.title') }}</span>
+        <div class="flex items-center justify-between gap-space-sm">
+          <div class="flex flex-col gap-0.5 min-w-0">
+            <div class="flex items-center gap-2">
+              <Icon name="globe" :class="geoEnabled ? 'text-primary' : 'text-outline'" class="text-[20px]" />
+              <span class="text-title-3 font-title-3 text-on-surface">{{ t('ipa.geo.title') }}</span>
+            </div>
+            <span v-if="geoEnabled" class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.geo.sub', { n: num(geoBuckets.length) }) }}</span>
           </div>
-          <NotConnected :reason="t('ipa.geo.reason')" />
+          <NotConnected v-if="!geoEnabled" :reason="t('ipa.geo.reason')" />
         </div>
         <div class="flex-1 min-h-[10rem]">
-          <NotConnected variant="placeholder" :reason="t('ipa.geo.reason')" />
+          <NotConnected v-if="!geoEnabled" variant="placeholder" :reason="t('ipa.geo.reason')" />
+          <div v-else-if="geoBuckets.length" class="flex flex-col gap-space-md">
+            <WorldThreatMap :buckets="geoBuckets" :gateway="gatewayLoc" />
+            <ul class="flex flex-col gap-space-sm">
+              <li v-for="g in geoBuckets" :key="g.country || 'unknown'" class="flex flex-col gap-1">
+                <div class="flex items-center justify-between gap-space-sm">
+                  <span class="flex items-center gap-1.5 min-w-0">
+                    <span class="text-[16px] leading-none shrink-0">{{ isoToFlag(g.country) || '🏳️' }}</span>
+                    <span class="text-subheadline font-subheadline text-on-surface truncate">{{ g.name || (g.country || t('ipa.dist.unknown')) }}</span>
+                    <span v-if="g.country" class="text-code-badge font-code-badge text-outline mono shrink-0">{{ g.country }}</span>
+                  </span>
+                  <span class="flex items-center gap-2 shrink-0 text-caption-1 font-caption-1 mono">
+                    <span class="text-on-surface">{{ num(g.total) }}</span>
+                    <span v-if="g.blocked" class="text-error">{{ t('ipa.dist.blockedTag', { n: num(g.blocked) }) }}</span>
+                  </span>
+                </div>
+                <span class="relative block h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+                  <span class="absolute inset-y-0 left-0 rounded-full bg-primary/40" :style="{ width: barPct(g.total, geoMaxTotal) }"></span>
+                  <span class="absolute inset-y-0 left-0 rounded-full bg-error" :style="{ width: barPct(g.blocked, geoMaxTotal) }"></span>
+                </span>
+              </li>
+            </ul>
+          </div>
+          <div v-else class="flex flex-col items-center justify-center gap-1.5 py-space-xl px-space-md text-center h-full">
+            <Icon name="globe" class="text-outline text-[24px]" />
+            <span class="text-subheadline font-subheadline text-on-surface-variant">{{ t('ipa.geo.empty') }}</span>
+          </div>
         </div>
       </div>
-      <div class="xl:col-span-5 flex flex-col gap-space-sm p-space-lg rounded-2xl bg-surface-container shadow-md border border-hairline">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <Icon name="hub" class="text-outline text-[20px]" />
-            <span class="text-title-3 font-title-3 text-on-surface">{{ t('ipa.asn.title') }}</span>
+      <!-- 右列：实时封禁沙箱 + ASN 映射上下堆叠，两卡均分本列高度；本列经 items-stretch
+           与左侧来源分布同高，故两张卡合起来正好与来源分布一致。 -->
+      <div class="xl:col-span-5 flex flex-col gap-space-lg min-h-0">
+        <!-- 实时封禁沙箱（bans[]，倒计时随每秒墙钟递减） -->
+        <div class="flex-1 min-h-0 flex flex-col rounded-2xl bg-surface-container shadow-lg border border-hairline overflow-hidden">
+          <div class="px-space-md py-space-sm border-b border-hairline flex items-center justify-between gap-space-xs">
+            <div class="flex flex-col">
+              <div class="flex items-center gap-space-xs">
+                <Icon name="gavel" class="text-tertiary text-[16px]" />
+                <span class="text-title-3 font-title-3 text-on-surface">{{ t('ipa.bans.title') }}</span>
+              </div>
+              <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.bans.sub') }}</span>
+            </div>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-tertiary/15 text-tertiary whitespace-nowrap">
+              {{ t('ipa.bans.count', { n: num(banCount) }) }}
+            </span>
           </div>
-          <NotConnected :reason="t('ipa.asn.reason')" />
+          <div class="flex-1 min-h-0 overflow-auto divide-y divide-hairline">
+            <div v-for="b in bans" :key="b.ip" class="flex items-center justify-between gap-space-sm px-space-md py-space-sm">
+              <div class="flex flex-col min-w-0">
+                <span class="flex items-center gap-1.5 min-w-0">
+                  <span
+                    v-if="isoToFlag(countryByIp.get(b.ip))"
+                    class="text-[14px] leading-none shrink-0"
+                  >{{ isoToFlag(countryByIp.get(b.ip)) }}</span>
+                  <span class="font-code-body text-code-body text-on-surface mono truncate">{{ b.ip }}</span>
+                </span>
+                <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.bans.until') }} · {{ untilText(b.until) }}</span>
+              </div>
+              <div class="flex flex-col items-end shrink-0">
+                <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.bans.remain') }}</span>
+                <span class="text-subheadline font-subheadline mono" :class="remainSecOf(b.until) > 0 ? 'text-tertiary' : 'text-outline'">
+                  {{ durationOf(remainSecOf(b.until)) }}
+                </span>
+              </div>
+            </div>
+            <div v-if="!bans.length" class="flex flex-col items-center justify-center gap-1.5 py-space-xl px-space-md text-center">
+              <Icon name="shield-check" class="text-secondary text-[24px]" />
+              <span class="text-subheadline font-subheadline text-on-surface-variant">{{ t('ipa.bans.empty') }}</span>
+              <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.bans.emptyHint') }}</span>
+            </div>
+          </div>
         </div>
-        <div class="flex-1 min-h-[10rem]">
-          <NotConnected variant="placeholder" :reason="t('ipa.asn.reason')" />
+        <!-- 攻击特征与 ASN 映射 -->
+        <div class="flex-1 min-h-0 flex flex-col gap-space-sm p-space-lg rounded-2xl bg-surface-container shadow-md border border-hairline">
+          <div class="flex items-center justify-between gap-space-sm">
+            <div class="flex flex-col gap-0.5 min-w-0">
+              <div class="flex items-center gap-2">
+                <Icon name="hub" :class="asnEnabled ? 'text-primary' : 'text-outline'" class="text-[20px]" />
+                <span class="text-title-3 font-title-3 text-on-surface">{{ t('ipa.asn.title') }}</span>
+              </div>
+              <span v-if="asnEnabled" class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.asn.sub', { n: num(asnBuckets.length) }) }}</span>
+            </div>
+            <NotConnected v-if="!asnEnabled" :reason="t('ipa.asn.reason')" />
+          </div>
+          <div class="flex-1 min-h-0 overflow-auto">
+            <NotConnected v-if="!asnEnabled" variant="placeholder" :reason="t('ipa.asn.reason')" />
+            <ul v-else-if="asnBuckets.length" class="flex flex-col gap-space-sm">
+              <li v-for="a in asnBuckets" :key="a.asn" class="flex flex-col gap-1">
+                <div class="flex items-center justify-between gap-space-sm">
+                  <span class="flex items-center gap-1.5 min-w-0">
+                    <span class="text-subheadline font-subheadline text-on-surface truncate">{{ asnLabel(a) }}</span>
+                    <span v-if="a.asn" class="text-code-badge font-code-badge text-outline mono shrink-0">AS{{ a.asn }}</span>
+                  </span>
+                  <span class="flex items-center gap-2 shrink-0 text-caption-1 font-caption-1 mono">
+                    <span class="text-on-surface">{{ num(a.total) }}</span>
+                    <span v-if="a.blocked" class="text-error">{{ t('ipa.dist.blockedTag', { n: num(a.blocked) }) }}</span>
+                  </span>
+                </div>
+                <span class="relative block h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+                  <span class="absolute inset-y-0 left-0 rounded-full bg-primary/40" :style="{ width: barPct(a.total, asnMaxTotal) }"></span>
+                  <span class="absolute inset-y-0 left-0 rounded-full bg-error" :style="{ width: barPct(a.blocked, asnMaxTotal) }"></span>
+                </span>
+              </li>
+            </ul>
+            <div v-else class="flex flex-col items-center justify-center gap-1.5 py-space-xl px-space-md text-center h-full">
+              <Icon name="hub" class="text-outline text-[24px]" />
+              <span class="text-subheadline font-subheadline text-on-surface-variant">{{ t('ipa.asn.empty') }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </section>

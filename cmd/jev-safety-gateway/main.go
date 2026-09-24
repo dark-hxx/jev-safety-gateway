@@ -11,9 +11,11 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"jev-safety-gateway/internal/config"
+	"jev-safety-gateway/internal/geoip"
 	"jev-safety-gateway/internal/logx"
 	"jev-safety-gateway/internal/server"
 	"jev-safety-gateway/web"
@@ -66,10 +68,27 @@ func serve(ctx context.Context) error {
 	// Optional bootstrap from environment on first run.
 	bootstrap(store)
 
+	// Optional GeoIP enrichment for the IP analytics page. Both paths are infra
+	// variables read every start (like JEV_DB_PATH, not the one-time bootstrap
+	// vars): the operator supplies local MaxMind databases (not bundled — GeoLite2
+	// licensing plus the offline constraint). An empty path or an unreadable file
+	// disables that dimension without failing startup; it is never on the proxy
+	// hot path.
+	geo, _ := geoip.Open(os.Getenv("JEV_GEOIP_COUNTRY_DB"), os.Getenv("JEV_GEOIP_ASN_DB"))
+	defer geo.Close()
+	// Where this gateway is deployed, for the origin map's central node. The
+	// gateway's own public IP is not knowable offline (it may sit behind nginx or
+	// a NAT), so this is operator-declared rather than inferred; leaving it unset
+	// keeps the hub off the map instead of inventing a position.
+	if lat, lon, ok := gatewayLocation(); ok {
+		geo.SetGatewayLocation(lat, lon)
+		log.Printf("geoip: gateway location declared at %.4f,%.4f", lat, lon)
+	}
+
 	// The admin console reports the bound endpoints, so hand it a value that
 	// outlives this call: Run fills the addresses in once it has listened.
 	info := buildInfo()
-	srv := server.New(store, web.FS(), proxyAddr, adminAddr, &info)
+	srv := server.New(store, web.FS(), proxyAddr, adminAddr, &info, geo)
 
 	return srv.Run(ctx)
 }
@@ -121,6 +140,25 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// gatewayLocation reads the declared deployment coordinate of this gateway from
+// JEV_GATEWAY_LAT / JEV_GATEWAY_LON (decimal degrees, WGS84). Both must be set
+// and in range to count as declared: a half-set or unparseable pair is ignored
+// with a log line rather than failing startup, which leaves the origin map
+// without a hub — the same as not configuring it at all.
+func gatewayLocation() (lat, lon float64, ok bool) {
+	rawLat, rawLon := os.Getenv("JEV_GATEWAY_LAT"), os.Getenv("JEV_GATEWAY_LON")
+	if rawLat == "" || rawLon == "" {
+		return 0, 0, false
+	}
+	la, errLat := strconv.ParseFloat(rawLat, 64)
+	lo, errLon := strconv.ParseFloat(rawLon, 64)
+	if errLat != nil || errLon != nil || la < -90 || la > 90 || lo < -180 || lo > 180 {
+		log.Printf("geoip: ignoring JEV_GATEWAY_LAT/JEV_GATEWAY_LON (%q, %q): want lat -90..90 and lon -180..180", rawLat, rawLon)
+		return 0, 0, false
+	}
+	return la, lo, true
 }
 
 func truthy(v string) bool {
