@@ -81,11 +81,11 @@ const passMeta = computed(() => (setupMode.value ? t('login.passMeta') : ''))
 const versionInfo = ref<api.VersionInfo | null>(null)
 const rttMs = ref<number | null>(null)
 
-/** 版本徽标文本：`v2.0.0`，有短提交号时追加 `+7a4ffcb`。 */
+/** 版本徽标文本：只展示版本号，如 `v1.0.0`。 */
 const versionText = computed(() => {
   const v = versionInfo.value
   if (!v?.version) return ''
-  return `v${v.version}${v.commit ? '+' + v.commit : ''}`
+  return `v${v.version}`
 })
 
 /** 守护进程地址：原型那枚胶囊里的 127.0.0.1:8080 是**代理口**，所以取 proxy_addr。 */

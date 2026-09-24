@@ -169,7 +169,7 @@ curl -fsSL https://raw.githubusercontent.com/dark-hxx/jev-safety-gateway/master/
 
 ```bash
 # For ARM64 replace amd64 with arm64; set VER to the latest version on the Releases page
-VER=2.0.0
+VER=1.0.0
 curl -fL -o jev.tar.gz \
   https://github.com/dark-hxx/jev-safety-gateway/releases/download/v${VER}/jev-safety-gateway-${VER}-linux-amd64.tar.gz
 tar xzf jev.tar.gz && cd jev-safety-gateway-${VER}-linux-amd64
