@@ -5,6 +5,8 @@ import NotConnected from '../../components/NotConnected.vue'
 import * as api from '../../api'
 import { useConsole } from '../../console'
 import { clockOf, dateTimeOf, decisionStyle, methodClass, num, score, scoreWidth } from '../../format'
+import { useI18n } from '../../i18n'
+import type { MessageKey } from '../../i18n/zh'
 import type { LogEntry, ModelCount } from '../../types'
 
 /**
@@ -25,6 +27,7 @@ import type { LogEntry, ModelCount } from '../../types'
  * 所有字段经 Vue 模板插值渲染，默认转义，等价于原实现的 `escapeHtml`，可防 XSS。
  */
 const { settings, stats24h } = useConsole()
+const { t } = useI18n()
 
 /**
  * 送检摘要是否落盘。关闭时后端写入的 `snippet` 恒为空串，界面用占位符说明，
@@ -34,27 +37,30 @@ const { settings, stats24h } = useConsole()
 const snippetRecorded = computed(() => settings.value.record_snippet)
 
 /** 关闭摘要记录时，审计列表与详情中代替摘要的占位文本。 */
-const SNIPPET_PLACEHOLDER = '未记录'
+const snippetPlaceholder = computed(() => t('audit.snippetOff'))
 
 const PAGE_SIZE = 50
 
 /** 时间范围控件：换算为 `/api/logs` 的 `since`（unix 毫秒下界）。 */
-const SINCE_OPTIONS = [
-  { label: '全部时间', ms: 0 },
-  { label: '最近 1 小时', ms: 3600_000 },
-  { label: '最近 6 小时', ms: 6 * 3600_000 },
-  { label: '最近 24 小时', ms: 24 * 3600_000 },
-  { label: '最近 7 天', ms: 7 * 86400_000 },
-] as const
+const SINCE_OPTIONS: { labelKey: MessageKey; ms: number }[] = [
+  { labelKey: 'audit.since.all', ms: 0 },
+  { labelKey: 'audit.since.1h', ms: 3600_000 },
+  { labelKey: 'audit.since.6h', ms: 6 * 3600_000 },
+  { labelKey: 'audit.since.24h', ms: 24 * 3600_000 },
+  { labelKey: 'audit.since.7d', ms: 7 * 86400_000 },
+]
 
-/** 判定状态控件：取值与后端 `decision` 完全一致。 */
-const DECISIONS = [
-  { value: '', label: '全部状态', en: 'ALL' },
-  { value: 'allow', label: '放行', en: 'ALLOWED' },
-  { value: 'block', label: '拦截', en: 'BLOCKED' },
-  { value: 'skip', label: '跳过', en: 'SKIPPED' },
-  { value: 'error', label: '错误', en: 'ERROR' },
-] as const
+/**
+ * 判定状态控件：`value` 取值与后端 `decision` 完全一致，`code` 是机器码（不随语言变化），
+ * 界面显示的是按当前语言取到的 `labelKey`。`code` 在筛选条件的副标题里保留，便于与日志对照。
+ */
+const DECISIONS: { value: string; labelKey: MessageKey; code: string }[] = [
+  { value: '', labelKey: 'decision.all', code: 'ALL' },
+  { value: 'allow', labelKey: 'decision.allow', code: 'ALLOWED' },
+  { value: 'block', labelKey: 'decision.block', code: 'BLOCKED' },
+  { value: 'skip', labelKey: 'decision.skip', code: 'SKIPPED' },
+  { value: 'error', labelKey: 'decision.error', code: 'ERROR' },
+]
 
 const decision = ref('')
 const model = ref('')
@@ -177,14 +183,18 @@ const chips = computed<Chip[]>(() => {
   const out: Chip[] = []
   if (decision.value) {
     const d = DECISIONS.find((x) => x.value === decision.value)
-    out.push({ label: `判定：${d?.label ?? decision.value}`, clear: () => (decision.value = '') })
+    const name = d ? t(d.labelKey) : decision.value
+    out.push({ label: t('audit.chip.decision', { v: name }), clear: () => (decision.value = '') })
   }
-  if (model.value.trim()) out.push({ label: `模型：${model.value.trim()}`, clear: () => (model.value = '') })
-  if (ip.value.trim()) out.push({ label: `来源 IP：${ip.value.trim()}`, clear: () => (ip.value = '') })
-  if (path.value.trim()) out.push({ label: `路径：${path.value.trim()}`, clear: () => (path.value = '') })
-  if (q.value.trim()) out.push({ label: `关键词：${q.value.trim()}`, clear: () => (q.value = '') })
+  if (model.value.trim()) out.push({ label: t('audit.chip.model', { v: model.value.trim() }), clear: () => (model.value = '') })
+  if (ip.value.trim()) out.push({ label: t('audit.chip.ip', { v: ip.value.trim() }), clear: () => (ip.value = '') })
+  if (path.value.trim()) out.push({ label: t('audit.chip.path', { v: path.value.trim() }), clear: () => (path.value = '') })
+  if (q.value.trim()) out.push({ label: t('audit.chip.q', { v: q.value.trim() }), clear: () => (q.value = '') })
   if (sinceIdx.value > 0) {
-    out.push({ label: `时间：${SINCE_OPTIONS[sinceIdx.value].label}`, clear: () => (sinceIdx.value = 0) })
+    out.push({
+      label: t('audit.chip.since', { v: t(SINCE_OPTIONS[sinceIdx.value].labelKey) }),
+      clear: () => (sinceIdx.value = 0),
+    })
   }
   return out
 })
@@ -228,18 +238,13 @@ onBeforeUnmount(() => {
     <!-- 页头 -->
     <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-space-md">
       <div class="flex flex-col gap-1">
-        <div class="flex items-center gap-space-xs flex-wrap">
-          <h1 class="text-title-2 font-title-2 text-on-surface tracking-tight">请求转发与全量审计记录</h1>
-          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-surface-bright text-on-surface-variant">
-            Forwarding &amp; Audit Stream
-          </span>
-        </div>
+        <h1 class="text-title-2 font-title-2 text-on-surface tracking-tight">{{ t('audit.title') }}</h1>
         <p class="text-subheadline font-subheadline text-on-surface-variant">
-          逐条记录送入检定的请求摘要、判定结果与来源，可按判定状态、目标模型、来源 IP、请求路径、关键词与时间范围检索。
+          {{ t('audit.sub') }}
         </p>
       </div>
       <div class="flex items-center gap-space-sm">
-        <NotConnected reason="后端未提供日志导出接口，无法生成 CSV。" />
+        <NotConnected :reason="t('audit.noExport')" />
         <button
           type="button"
           class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-subheadline font-subheadline text-on-surface transition-all disabled:opacity-50"
@@ -247,7 +252,7 @@ onBeforeUnmount(() => {
           @click="clearAll"
         >
           <Icon name="filter-off" class="text-[16px]" />
-          <span>清空筛选</span>
+          <span>{{ t('audit.clearFilters') }}</span>
         </button>
         <button
           type="button"
@@ -256,7 +261,7 @@ onBeforeUnmount(() => {
           @click="refresh"
         >
           <Icon name="refresh" class="text-[16px]" :class="loading ? 'animate-spin' : ''" />
-          <span>刷新</span>
+          <span>{{ t('audit.refresh') }}</span>
         </button>
       </div>
     </div>
@@ -264,19 +269,19 @@ onBeforeUnmount(() => {
     <!-- 24 小时真实计数（来源 GET /api/state 的 stats24h） -->
     <section class="grid grid-cols-2 lg:grid-cols-4 gap-space-md">
       <div class="flex flex-col p-space-sm rounded-2xl bg-surface-container shadow-sm border border-hairline">
-        <span class="eyebrow">24h 总转送</span>
+        <span class="eyebrow">{{ t('audit.stat.total') }}</span>
         <span class="text-title-3 font-title-3 text-on-surface mono">{{ num(stats24h.total) }}</span>
       </div>
       <div class="flex flex-col p-space-sm rounded-2xl bg-surface-container shadow-sm border border-hairline">
-        <span class="eyebrow">直接放行</span>
+        <span class="eyebrow">{{ t('audit.stat.allowed') }}</span>
         <span class="text-title-3 font-title-3 text-secondary mono">{{ num(stats24h.allowed) }}</span>
       </div>
       <div class="flex flex-col p-space-sm rounded-2xl bg-surface-container shadow-sm border border-hairline">
-        <span class="eyebrow">威胁拦截</span>
+        <span class="eyebrow">{{ t('audit.stat.blocked') }}</span>
         <span class="text-title-3 font-title-3 text-error mono">{{ num(stats24h.blocked) }}</span>
       </div>
       <div class="flex flex-col p-space-sm rounded-2xl bg-surface-container shadow-sm border border-hairline">
-        <span class="eyebrow">白名单跳过</span>
+        <span class="eyebrow">{{ t('audit.stat.skipped') }}</span>
         <span class="text-title-3 font-title-3 text-on-surface-variant mono">{{ num(stats24h.skipped) }}</span>
       </div>
     </section>
@@ -285,7 +290,7 @@ onBeforeUnmount(() => {
     <section class="flex flex-col gap-space-md p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
       <div class="flex flex-col xl:flex-row xl:items-center gap-space-md flex-wrap">
         <div class="flex items-center gap-space-sm flex-wrap">
-          <span class="eyebrow shrink-0">判定状态</span>
+          <span class="eyebrow shrink-0">{{ t('audit.filter.decision') }}</span>
           <div class="inline-flex p-0.5 bg-surface-container-high rounded-lg flex-wrap">
             <button
               v-for="d in DECISIONS"
@@ -293,25 +298,26 @@ onBeforeUnmount(() => {
               type="button"
               class="px-3 py-1 rounded-md text-caption-2 font-caption-2 transition-all"
               :class="decision === d.value ? 'bg-surface-bright text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'"
+              :title="d.code"
               @click="decision = d.value"
             >
-              {{ d.label }}
+              {{ t(d.labelKey) }}
             </button>
           </div>
         </div>
 
         <div class="flex items-center gap-space-sm flex-wrap">
-          <span class="eyebrow shrink-0">时间范围</span>
+          <span class="eyebrow shrink-0">{{ t('audit.filter.since') }}</span>
           <div class="inline-flex p-0.5 bg-surface-container-high rounded-lg flex-wrap">
             <button
               v-for="(o, i) in SINCE_OPTIONS"
-              :key="o.label"
+              :key="o.labelKey"
               type="button"
               class="px-3 py-1 rounded-md text-caption-2 font-caption-2 transition-all"
               :class="sinceIdx === i ? 'bg-surface-bright text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface'"
               @click="sinceIdx = i"
             >
-              {{ o.label }}
+              {{ t(o.labelKey) }}
             </button>
           </div>
         </div>
@@ -320,46 +326,46 @@ onBeforeUnmount(() => {
       <!-- 四个条件按原型顺序：来源 IP → 目标模型 → 请求路径 → 关键词 -->
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-space-sm">
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-2 font-caption-2 text-outline">来源 IP（前缀匹配）</span>
+          <span class="text-caption-2 font-caption-2 text-outline">{{ t('audit.filter.ip') }}</span>
           <input
             v-model="ip"
             type="text"
-            placeholder="例如 194.26.* 或 127.0.0.1"
+            :placeholder="t('audit.filter.ipPlaceholder')"
             spellcheck="false"
             class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset mono"
           />
         </label>
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-2 font-caption-2 text-outline">目标模型（精确匹配）</span>
+          <span class="text-caption-2 font-caption-2 text-outline">{{ t('audit.filter.model') }}</span>
           <span class="relative">
             <select
               v-model="model"
               class="w-full appearance-none pl-3 pr-8 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset mono"
             >
-              <option value="">全部请求模型</option>
+              <option value="">{{ t('audit.filter.allModels') }}</option>
               <option v-for="m in modelChoices" :key="m.value" :value="m.value">
-                {{ m.count > 0 ? `${m.value} (${num(m.count)})` : `${m.value}（最近无记录）` }}
+                {{ m.count > 0 ? `${m.value} (${num(m.count)})` : t('audit.filter.noRecent', { model: m.value }) }}
               </option>
             </select>
             <Icon name="chevron-down" class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-outline text-[16px]" />
           </span>
         </label>
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-2 font-caption-2 text-outline">请求路径（子串匹配）</span>
+          <span class="text-caption-2 font-caption-2 text-outline">{{ t('audit.filter.path') }}</span>
           <input
             v-model="path"
             type="text"
-            placeholder="例如 /v1/chat/completions"
+            :placeholder="t('audit.filter.pathPlaceholder')"
             spellcheck="false"
             class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset mono"
           />
         </label>
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-2 font-caption-2 text-outline">关键词（路径 / 模型 / 来源 IP / 原因{{ snippetRecorded ? ' / 送检摘要' : '' }}）</span>
+          <span class="text-caption-2 font-caption-2 text-outline">{{ t('audit.filter.q', { snippet: snippetRecorded ? t('audit.filter.qSnippet') : '' }) }}</span>
           <input
             v-model="q"
             type="text"
-            placeholder="例如 1.2.3.4 或 blocked"
+            :placeholder="t('audit.filter.qPlaceholder')"
             spellcheck="false"
             class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
           />
@@ -367,7 +373,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="chips.length" class="flex items-center gap-space-xs flex-wrap">
-        <span class="eyebrow">活跃条件</span>
+        <span class="eyebrow">{{ t('audit.chips.title') }}</span>
         <button
           v-for="c in chips"
           :key="c.label"
@@ -379,7 +385,7 @@ onBeforeUnmount(() => {
           <Icon name="x" class="text-[12px]" />
         </button>
         <button type="button" class="text-caption-2 font-caption-2 text-primary hover:underline" @click="clearAll">
-          清空所有标记
+          {{ t('audit.chips.clearAll') }}
         </button>
       </div>
     </section>
@@ -388,14 +394,12 @@ onBeforeUnmount(() => {
     <section class="flex flex-col rounded-2xl bg-surface-container shadow-lg border border-hairline overflow-hidden">
       <div class="px-space-md py-space-sm border-b border-hairline flex items-center justify-between flex-wrap gap-space-xs">
         <div class="flex items-center gap-space-sm">
-          <span class="text-subheadline font-subheadline text-on-surface">审计流水</span>
-          <span v-if="loading" class="text-caption-2 font-caption-2 text-outline">查询中…</span>
+          <span class="text-subheadline font-subheadline text-on-surface">{{ t('audit.stream') }}</span>
+          <span v-if="loading" class="text-caption-2 font-caption-2 text-outline">{{ t('audit.querying') }}</span>
         </div>
         <div class="flex items-center gap-space-sm">
           <span v-if="loadError" class="text-caption-1 font-caption-1 text-error">{{ loadError }}</span>
-          <span v-else class="text-caption-1 font-caption-1 text-on-surface-variant">
-            共 <span class="mono text-on-surface">{{ num(total) }}</span> 条
-          </span>
+          <span v-else class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.totalRecords', { n: num(total) }) }}</span>
         </div>
       </div>
 
@@ -404,16 +408,16 @@ onBeforeUnmount(() => {
         <table class="w-full min-w-[62rem] text-left border-collapse">
           <thead class="sticky top-0 z-10 bg-surface-container-high">
             <tr class="text-caption-2 font-caption-2 text-on-surface-variant">
-              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">时间</th>
-              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">方法 / 路径</th>
-              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">模型</th>
-              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">判定</th>
-              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">分值</th>
-              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">耗时</th>
-              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">来源 IP</th>
-              <th class="px-space-sm py-2.5 font-medium">原因</th>
-              <th class="px-space-sm py-2.5 font-medium min-w-[14rem]">送检摘要</th>
-              <th class="px-space-sm py-2.5"><span class="sr-only">详情</span></th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">{{ t('audit.col.time') }}</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">{{ t('audit.col.path') }}</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">{{ t('audit.col.model') }}</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">{{ t('audit.col.decision') }}</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">{{ t('audit.col.score') }}</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">{{ t('audit.col.latency') }}</th>
+              <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">{{ t('audit.col.ip') }}</th>
+              <th class="px-space-sm py-2.5 font-medium">{{ t('audit.col.reason') }}</th>
+              <th class="px-space-sm py-2.5 font-medium min-w-[14rem]">{{ t('audit.col.snippet') }}</th>
+              <th class="px-space-sm py-2.5"><span class="sr-only">{{ t('audit.col.details') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -443,7 +447,7 @@ onBeforeUnmount(() => {
                   <span class="h-1.5 w-1.5 rounded-full" :class="decisionStyle(e.decision).dot"></span>
                   <span>{{ decisionStyle(e.decision).label }}</span>
                 </span>
-                <span class="block text-caption-2 font-caption-2 text-outline mono">{{ decisionStyle(e.decision).en }}</span>
+                <span class="block text-caption-2 font-caption-2 text-outline mono">{{ decisionStyle(e.decision).code }}</span>
               </td>
               <td class="px-space-sm py-2.5">
                 <span class="font-code-body text-code-body mono" :class="decisionStyle(e.decision).text">{{ score(e.score) }}</span>
@@ -461,7 +465,7 @@ onBeforeUnmount(() => {
                 <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2">{{ e.reason || '-' }}</span>
               </td>
               <td class="px-space-sm py-2.5">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2 break-all">{{ e.snippet || (snippetRecorded ? '-' : SNIPPET_PLACEHOLDER) }}</span>
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2 break-all">{{ e.snippet || (snippetRecorded ? '-' : snippetPlaceholder) }}</span>
               </td>
               <td class="px-space-sm py-2.5 text-right">
                 <Icon name="chevron-right" class="text-outline text-[16px]" />
@@ -472,9 +476,9 @@ onBeforeUnmount(() => {
 
         <div v-if="!items.length && !loading" class="flex flex-col items-center justify-center gap-1.5 py-space-xl">
           <Icon name="search" class="text-outline text-[24px]" />
-          <span class="text-subheadline font-subheadline text-on-surface-variant">暂无记录</span>
+          <span class="text-subheadline font-subheadline text-on-surface-variant">{{ t('audit.empty') }}</span>
           <span class="text-caption-2 font-caption-2 text-outline">
-            {{ chips.length ? '当前筛选条件没有匹配的审计记录。' : '网关尚未产生审计记录。' }}
+            {{ chips.length ? t('audit.emptyFiltered') : t('audit.emptyNone') }}
           </span>
         </div>
       </div>
@@ -482,8 +486,8 @@ onBeforeUnmount(() => {
       <!-- 服务端分页 -->
       <div class="px-space-md py-space-sm border-t border-hairline flex items-center justify-between flex-wrap gap-space-sm">
         <span class="text-caption-1 font-caption-1 text-on-surface-variant">
-          {{ items.length ? `显示第 ${num(offset + 1)} - ${num(offset + items.length)} 条，共 ${num(total)} 条` : `共 ${num(total)} 条` }}
-          <span class="text-outline">· 每页 {{ PAGE_SIZE }} 条</span>
+          {{ items.length ? t('audit.paging.showing', { from: num(offset + 1), to: num(offset + items.length), total: num(total) }) : t('audit.totalRecords', { n: num(total) }) }}
+          <span class="text-outline">{{ t('audit.paging.perPage', { n: PAGE_SIZE }) }}</span>
         </span>
         <div class="flex items-center gap-space-sm">
           <button
@@ -493,10 +497,10 @@ onBeforeUnmount(() => {
             @click="go(-1)"
           >
             <Icon name="chevron-left" class="text-[14px]" />
-            <span>上一页</span>
+            <span>{{ t('audit.prev') }}</span>
           </button>
           <span class="text-caption-1 font-caption-1 text-on-surface-variant whitespace-nowrap">
-            第 <span class="mono text-on-surface">{{ page }}</span> / 共 <span class="mono text-on-surface">{{ pages }}</span> 页
+            {{ t('audit.paging.pageOf', { page, pages }) }}
           </span>
           <button
             type="button"
@@ -504,7 +508,7 @@ onBeforeUnmount(() => {
             :disabled="!canNext || loading"
             @click="go(1)"
           >
-            <span>下一页</span>
+            <span>{{ t('audit.next') }}</span>
             <Icon name="chevron-right" class="text-[14px]" />
           </button>
         </div>
@@ -526,14 +530,14 @@ onBeforeUnmount(() => {
           <div class="flex items-center gap-space-xs min-w-0">
             <Icon name="search-check" class="text-primary text-[18px] shrink-0" />
             <div class="flex flex-col min-w-0">
-              <span class="text-headline font-headline text-on-surface">审计详情</span>
+              <span class="text-headline font-headline text-on-surface">{{ t('audit.detail.title') }}</span>
               <span class="text-caption-2 font-caption-2 text-outline mono truncate">#{{ selected.id }} · {{ selected.path }}</span>
             </div>
           </div>
           <button
             type="button"
             class="p-1 rounded-lg text-on-surface-variant hover:bg-surface-container-high transition-colors shrink-0"
-            aria-label="关闭详情"
+            :aria-label="t('audit.detail.close')"
             @click="closeDetail"
           >
             <Icon name="x" class="text-[18px]" />
@@ -546,7 +550,7 @@ onBeforeUnmount(() => {
             <div class="flex items-center gap-2">
               <span class="h-2.5 w-2.5 rounded-full" :class="decisionStyle(selected.decision).dot"></span>
               <span class="text-headline font-headline">{{ decisionStyle(selected.decision).label }}</span>
-              <span class="text-caption-2 font-caption-2 opacity-80 mono">{{ decisionStyle(selected.decision).en }}</span>
+              <span class="text-caption-2 font-caption-2 opacity-80 mono">{{ decisionStyle(selected.decision).code }}</span>
             </div>
             <span class="text-title-3 font-title-3 mono">{{ score(selected.score) }}</span>
           </div>
@@ -554,54 +558,54 @@ onBeforeUnmount(() => {
           <!-- 全部已持久化字段 -->
           <div class="flex flex-col rounded-xl bg-surface-container overflow-hidden">
             <div class="px-space-sm py-2 border-b border-hairline">
-              <span class="eyebrow">已持久化字段</span>
+              <span class="eyebrow">{{ t('audit.detail.persisted') }}</span>
             </div>
             <dl class="divide-y divide-hairline">
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">记录 ID</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.id') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.id }}</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">时间</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.time') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ dateTimeOf(selected.ts) }}</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">方法</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.method') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.method }}</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">路径</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.path') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right break-all">{{ selected.path }}</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">内容类型</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.kind') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.kind || '-' }}</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">目标模型</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.model') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right break-all">{{ selected.model || '-' }}</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">分值</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.score') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ score(selected.score) }}</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">网关耗时</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.latency') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.latency_ms }} ms</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">来源 IP</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.ip') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.ip || '-' }}</dd>
               </div>
               <div class="flex flex-col gap-1 px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant">原因</dt>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.field.reason') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface break-words">{{ selected.reason || '-' }}</dd>
               </div>
               <div class="flex flex-col gap-1 px-space-sm py-2">
-                <dt class="text-caption-1 font-caption-1 text-on-surface-variant">送检摘要</dt>
-                <dd class="text-caption-1 font-caption-1 text-on-surface break-words">{{ selected.snippet || (snippetRecorded ? '-' : SNIPPET_PLACEHOLDER) }}</dd>
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.field.snippet') }}</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface break-words">{{ selected.snippet || (snippetRecorded ? '-' : snippetPlaceholder) }}</dd>
                 <span v-if="!snippetRecorded" class="text-caption-2 font-caption-2 text-outline">
-                  当前已关闭「记录用户送检摘要」，网关不再持久化送检文本；该开关不会追溯修改既有记录。
+                  {{ t('audit.snippetOffNote') }}
                 </span>
               </div>
             </dl>
@@ -609,35 +613,31 @@ onBeforeUnmount(() => {
 
           <!-- 未持久化字段：明确降级，不留空值也不编造 -->
           <div class="flex flex-col gap-space-sm p-space-sm rounded-xl border border-dashed border-outline-variant/60">
-            <span class="eyebrow">未持久化字段</span>
+            <span class="eyebrow">{{ t('audit.detail.notPersisted') }}</span>
             <div class="flex flex-col gap-space-xs">
               <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">地理位置</span>
-                <NotConnected reason="后端不解析 IP 归属地，也没有 GeoIP 数据源。" />
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.geo') }}</span>
+                <NotConnected :reason="t('audit.missing.geoReason')" />
               </div>
               <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">全局请求唯一 ID</span>
-                <NotConnected reason="主链路不生成请求级追踪 ID；此处仅持久化了 SQLite 自增 id。" />
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.traceId') }}</span>
+                <NotConnected :reason="t('audit.missing.traceIdReason')" />
               </div>
               <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">耗时分解</span>
-                <NotConnected reason="只记录单次总耗时，未拆分检定与转发阶段。" />
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.latencyBreakdown') }}</span>
+                <NotConnected :reason="t('audit.missing.latencyBreakdownReason')" />
               </div>
               <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">Token 估算与风险级</span>
-                <NotConnected reason="后端不统计 Token，也不对记录做风险分级。" />
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.tokens') }}</span>
+                <NotConnected :reason="t('audit.missing.tokensReason')" />
               </div>
               <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">处置规则矩阵</span>
-                <NotConnected reason="判定由单一阈值产生，没有命名规则与规则链。" />
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.rules') }}</span>
+                <NotConnected :reason="t('audit.missing.rulesReason')" />
               </div>
               <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">完整原始请求体</span>
-                <NotConnected
-                  :reason="snippetRecorded
-                    ? '按设计不持久化原始载荷，仅保留截断后的送检摘要。'
-                    : '按设计不持久化原始载荷；当前已关闭送检摘要记录，日志中不含任何送检文本。'"
-                />
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.rawBody') }}</span>
+                <NotConnected :reason="t(snippetRecorded ? 'audit.missing.rawBodyOn' : 'audit.missing.rawBodyOff')" />
               </div>
             </div>
           </div>
@@ -646,7 +646,7 @@ onBeforeUnmount(() => {
         <!-- 原型中的操作：后端无支撑，不提供可执行按钮 -->
         <div class="px-space-md py-space-sm border-t border-hairline flex flex-col gap-space-xs">
           <span class="text-caption-2 font-caption-2 text-outline">
-            加入黑名单、重放测试无对应后端接口，因此不提供操作入口；如需封禁某来源，可调低阈值或在审计记录中定位后于运维侧处理。
+            {{ t('audit.noActions') }}
           </span>
         </div>
       </aside>

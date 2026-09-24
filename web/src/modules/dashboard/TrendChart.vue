@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { num } from '../../format'
+import { useI18n } from '../../i18n'
 import type { StatBucket } from '../../types'
 
 /**
@@ -19,6 +20,8 @@ const props = defineProps<{
   /** 是否已经拿到过响应：false 时显示等待态，而不是画一个看起来像「0 流量」的坐标轴。 */
   loaded: boolean
 }>()
+
+const { t } = useI18n()
 
 const H = 100
 const W = 1000
@@ -114,7 +117,7 @@ const hoverLeft = computed(() =>
   <div class="relative w-full h-72" @mousemove="onMove" @mouseleave="hovered = null">
     <!-- 等待态：没有响应就不画坐标轴，避免看起来像「0 流量」 -->
     <div v-if="!loaded" class="w-full h-full flex items-center justify-center rounded-xl bg-surface-container-low/80">
-      <span class="text-caption-1 font-caption-1 text-outline">正在读取统计…</span>
+      <span class="text-caption-1 font-caption-1 text-outline">{{ t('common.loadingStats') }}</span>
     </div>
 
     <div v-else class="w-full h-full rounded-xl bg-surface-container-low/80 px-space-sm py-space-xs flex flex-col">
@@ -137,7 +140,7 @@ const hoverLeft = computed(() =>
             :viewBox="`0 0 ${W} ${H}`"
             preserveAspectRatio="none"
             role="img"
-            aria-label="流量与安全威胁态势趋势图"
+            :aria-label="t('chart.aria')"
           >
             <line
               v-for="t in yTicks"
@@ -194,7 +197,7 @@ const hoverLeft = computed(() =>
           <!-- 全 0 时明确说明，而不是让用户对着贴底的直线猜 -->
           <div v-if="!hasData" class="absolute inset-0 flex items-center justify-center pointer-events-none">
             <span class="px-2 py-0.5 rounded-full bg-surface-container-high text-caption-2 font-caption-2 text-on-surface-variant">
-              该区间内没有请求记录（各桶计数均为 0）
+              {{ t('chart.empty') }}
             </span>
           </div>
 
@@ -205,9 +208,9 @@ const hoverLeft = computed(() =>
             :style="{ left: `${hoverLeft}%` }"
           >
             <span class="text-caption-2 font-caption-2 text-outline mono">{{ new Date(hoverBucket.ts).toLocaleString() }}</span>
-            <span class="text-caption-2 font-caption-2 text-on-surface mono">入站 {{ num(hoverBucket.total) }}</span>
-            <span class="text-caption-2 font-caption-2 text-secondary mono">放行 {{ num(hoverBucket.allowed) }}</span>
-            <span class="text-caption-2 font-caption-2 text-error mono">拦截 {{ num(hoverBucket.blocked) }}</span>
+            <span class="text-caption-2 font-caption-2 text-on-surface mono">{{ t('chart.hoverIn', { n: num(hoverBucket.total) }) }}</span>
+            <span class="text-caption-2 font-caption-2 text-secondary mono">{{ t('chart.hoverAllowed', { n: num(hoverBucket.allowed) }) }}</span>
+            <span class="text-caption-2 font-caption-2 text-error mono">{{ t('chart.hoverBlocked', { n: num(hoverBucket.blocked) }) }}</span>
           </div>
         </div>
       </div>

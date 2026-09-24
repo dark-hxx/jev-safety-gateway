@@ -5,6 +5,7 @@ import AppShell from './components/AppShell.vue'
 import LoginView from './components/LoginView.vue'
 import * as api from './api'
 import { provideConsole } from './console'
+import { t, useI18n } from './i18n'
 import type { Settings, StateResponse } from './types'
 
 /**
@@ -105,19 +106,22 @@ async function onSettingsSaved(updated: Settings): Promise<void> {
 
 /**
  * 浏览器标签页标题。未登录时显示认证入口的标题，登录后跟随当前路由界面，
- * 避免停留在登录页却显示上一次界面的标题。
+ * 避免停留在登录页却显示上一次界面的标题。界面标题按当前语言取用。
  */
+const { locale } = useI18n()
+
 function syncTitle(): void {
   if (!authed.value) {
-    document.title = needsSetup.value ? '初始配置 · JEV Safety Gateway' : '登录 · JEV Safety Gateway'
+    document.title = needsSetup.value ? t('title.setup') : t('title.login')
     return
   }
-  const t = route.meta.title as { zh?: string } | undefined
-  document.title = t?.zh ? `${t.zh} · JEV Safety Gateway` : 'JEV Safety Gateway'
+  const meta = route.meta.title as { zh?: string; en?: string } | undefined
+  const screen = locale.value === 'en' ? meta?.en : meta?.zh
+  document.title = screen ? `${screen} · ${t('app.name')}` : t('app.name')
 }
 
 router.afterEach(syncTitle)
-watch([authed, needsSetup], syncTitle, { immediate: true })
+watch([authed, needsSetup, locale], syncTitle, { immediate: true })
 
 /**
  * 装载共享上下文。此处按需求值：路由界面只在 `state` 就绪（`AppShell` 已渲染）
@@ -138,7 +142,7 @@ provideConsole({
       <div class="h-10 w-10 rounded-xl bg-surface-container-high flex items-center justify-center">
         <span class="h-2.5 w-2.5 rounded-full bg-primary animate-pulse"></span>
       </div>
-      <span class="text-caption-1 font-caption-1 text-outline">正在连接管理服务…</span>
+      <span class="text-caption-1 font-caption-1 text-outline">{{ t('boot.connecting') }}</span>
     </div>
   </div>
 

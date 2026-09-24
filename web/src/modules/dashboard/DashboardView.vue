@@ -6,6 +6,8 @@ import NotConnected from '../../components/NotConnected.vue'
 import * as api from '../../api'
 import { useConsole } from '../../console'
 import { num, pctText } from '../../format'
+import { useI18n } from '../../i18n'
+import type { MessageKey } from '../../i18n/zh'
 import type { Stats, StatsResponse } from '../../types'
 import TrendChart from './TrendChart.vue'
 import ScoreDistribution from './ScoreDistribution.vue'
@@ -27,17 +29,20 @@ import ScoreDistribution from './ScoreDistribution.vue'
  */
 const { settings, keys, stats24h } = useConsole()
 const router = useRouter()
+const { t } = useI18n()
 
 /** 时间范围分段控件：与 `/api/stats?hours=` 的 `hours` 参数一一对应。 */
-const RANGES = [
-  { label: '1h', hours: 1, zh: '最近 1 小时' },
-  { label: '6h', hours: 6, zh: '最近 6 小时' },
-  { label: '24h', hours: 24, zh: '最近 24 小时' },
-  { label: '7d', hours: 168, zh: '最近 7 天' },
-] as const
+const RANGES: { label: string; hours: number; labelKey: MessageKey }[] = [
+  { label: '1h', hours: 1, labelKey: 'range.1h' },
+  { label: '6h', hours: 6, labelKey: 'range.6h' },
+  { label: '24h', hours: 24, labelKey: 'range.24h' },
+  { label: '7d', hours: 168, labelKey: 'range.7d' },
+]
 
 const rangeIdx = ref(2)
 const range = computed(() => RANGES[rangeIdx.value])
+/** 当前范围的界面语言名称；分段控件本身显示 `1h/6h/24h/7d` 这种机器刻度，保持可对照。 */
+const rangeText = computed(() => t(range.value.labelKey))
 
 /** 首屏用 `/api/state` 已带回的 24h 快照，避免白屏；切换范围后由 `/api/stats` 更新。 */
 const stats = ref<Stats>({ ...stats24h.value })
@@ -82,14 +87,14 @@ async function loadLatency(): Promise<void> {
   }
 }
 
-/** 分桶粒度的中文说明，来自后端回传的 `bucket_seconds`。 */
+/** 分桶粒度的说明，来自后端回传的 `bucket_seconds`。 */
 const bucketLabel = computed(() => {
   const s = bucketSeconds.value
   if (!s) return ''
-  if (s % 86400 === 0) return `${s / 86400} 天`
-  if (s % 3600 === 0) return `${s / 3600} 小时`
-  if (s % 60 === 0) return `${s / 60} 分钟`
-  return `${s} 秒`
+  if (s % 86400 === 0) return t('duration.days', { n: s / 86400 })
+  if (s % 3600 === 0) return t('duration.hours', { n: s / 3600 })
+  if (s % 60 === 0) return t('duration.minutes', { n: s / 60 })
+  return t('duration.seconds', { n: s })
 })
 
 function selectRange(i: number): void {
@@ -127,7 +132,7 @@ const adminHost = computed(() => (typeof location !== 'undefined' ? location.hos
 const latencyDetail = computed(() => {
   const l = latency.value
   if (!l || l.count === 0) return ''
-  return `P50 ${l.p50} ms · P95 ${l.p95} ms · ${num(l.count)} 次请求`
+  return t('dash.latencyDetail', { p50: l.p50, p95: l.p95, count: num(l.count) })
 })
 
 /**
@@ -136,8 +141,8 @@ const latencyDetail = computed(() => {
  */
 const latencyCaption = computed(() => {
   const l = latency.value
-  if (!l || l.count === 0) return '延迟分布未接入'
-  return l.sampled ? '记录数超出取样上限，以上为按时间均匀采样的近似值' : '区间内全部请求的端到端耗时'
+  if (!l || l.count === 0) return t('dash.latencyUnhooked')
+  return l.sampled ? t('dash.latencySampled') : t('dash.latencyFull')
 })
 </script>
 
@@ -162,16 +167,16 @@ const latencyCaption = computed(() => {
           </div>
           <div class="flex flex-col">
             <div class="flex items-center gap-space-xs flex-wrap">
-              <h1 class="text-title-1 font-title-1 text-on-surface tracking-tight">安全监控驾驶舱</h1>
+              <h1 class="text-title-1 font-title-1 text-on-surface tracking-tight">{{ t('dash.title') }}</h1>
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-secondary/15 text-secondary">
-                ENGINE {{ settings.jev_model || '未设置' }}
+                {{ t('dash.engineChip', { model: settings.jev_model || t('shell.notSet') }) }}
               </span>
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-caption-2 font-caption-2 bg-surface-bright text-on-surface-variant">
-                管理口 {{ adminHost }}
+                {{ t('dash.adminHost', { host: adminHost }) }}
               </span>
             </div>
             <p class="text-subheadline font-subheadline text-on-surface-variant mt-0.5">
-              实时流量深度规约 · 提示词越狱阻断 · PII 数据脱敏路由保护
+              {{ t('dash.subtitle') }}
             </p>
           </div>
         </div>
@@ -179,31 +184,33 @@ const latencyCaption = computed(() => {
         <!-- 实时指标带 -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-space-sm bg-surface-container-high/60 p-space-sm rounded-xl">
           <div class="flex flex-col px-space-xs gap-0.5">
-            <span class="eyebrow">{{ range.label }} 转送量</span>
+            <span class="eyebrow">{{ t('dash.forwarded', { range: rangeText }) }}</span>
             <span class="text-headline font-headline text-on-surface mono">{{ num(stats.total) }}</span>
-            <span class="text-caption-1 font-caption-1 text-outline">来自 /api/stats</span>
+            <span class="text-caption-1 font-caption-1 text-outline">{{ t('dash.fromStats') }}</span>
           </div>
           <div class="flex flex-col px-space-xs gap-0.5">
-            <span class="eyebrow">峰值流量 PPS</span>
-            <NotConnected reason="后端未采集吞吐速率时序，无法给出秒级峰值。" />
-            <span class="text-caption-1 font-caption-1 text-outline">需要新增指标采集</span>
+            <span class="eyebrow">{{ t('dash.peakPps') }}</span>
+            <NotConnected :reason="t('dash.peakPpsReason')" />
+            <span class="text-caption-1 font-caption-1 text-outline">{{ t('dash.needMetric') }}</span>
           </div>
           <div class="flex flex-col px-space-xs gap-0.5">
-            <span class="eyebrow">网关状态</span>
+            <span class="eyebrow">{{ t('dash.gwState') }}</span>
             <div class="flex items-center gap-1.5 mt-1">
               <span class="w-2 h-2 rounded-full" :class="settings.enabled ? 'bg-secondary' : 'bg-outline'"></span>
               <span class="text-caption-1 font-caption-1 font-semibold" :class="settings.enabled ? 'text-secondary' : 'text-outline'">
-                {{ settings.enabled ? 'Active · 过滤中' : 'Disabled · 全量放行' }}
+                {{ settings.enabled ? t('dash.active') : t('dash.disabled') }}
               </span>
             </div>
             <span class="text-caption-2 font-caption-2 text-outline">
-              {{ settings.fail_open ? 'Fail-Open 已开启' : 'Fail-Close 已开启' }}
+              {{ settings.fail_open ? t('dash.failOpenOn') : t('dash.failCloseOn') }}
             </span>
           </div>
           <div class="flex flex-col px-space-xs gap-0.5">
-            <span class="eyebrow">集群实例</span>
-            <NotConnected reason="当前为单进程单实例部署，没有集群节点数据。" />
-            <span class="text-caption-2 font-caption-2 text-outline">密钥池 {{ keysEnabled }} / {{ keys.length }} 可用</span>
+            <span class="eyebrow">{{ t('dash.cluster') }}</span>
+            <NotConnected :reason="t('dash.clusterReason')" />
+            <span class="text-caption-2 font-caption-2 text-outline">
+              {{ t('dash.keysAvail', { enabled: keysEnabled, total: keys.length }) }}
+            </span>
           </div>
         </div>
       </div>
@@ -213,26 +220,28 @@ const latencyCaption = computed(() => {
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-space-md">
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
         <div class="flex items-center justify-between">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ range.label }} 总请求量</span>
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('dash.card.total', { range: rangeText }) }}</span>
           <Icon name="swap-horiz" class="text-primary text-[18px]" />
         </div>
         <div class="my-space-sm">
           <div class="text-title-2 font-title-2 text-on-surface tracking-tight mono">{{ num(stats.total) }}</div>
-          <div class="mt-0.5"><NotConnected reason="后端只提供当前区间序列，没有上一同长区间的聚合，无法计算环比。" /></div>
+          <div class="mt-0.5"><NotConnected :reason="t('dash.card.totalReason')" /></div>
         </div>
-        <div class="text-caption-2 font-caption-2 text-outline">环比未接入</div>
+        <div class="text-caption-2 font-caption-2 text-outline">{{ t('dash.card.totalFoot') }}</div>
       </div>
 
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
         <div class="flex items-center justify-between">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">正常放行率</span>
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('dash.card.allowed') }}</span>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-secondary/15 text-secondary">
-            Normal
+            {{ t('dash.tag.normal') }}
           </span>
         </div>
         <div class="my-space-sm">
           <div class="text-title-2 font-title-2 text-on-surface tracking-tight mono">{{ allowedRate }}</div>
-          <div class="text-caption-2 font-caption-2 text-outline mt-0.5">{{ num(stats.allowed) }} 次放行请求</div>
+          <div class="text-caption-2 font-caption-2 text-outline mt-0.5">
+            {{ t('dash.card.allowedCaption', { n: num(stats.allowed) }) }}
+          </div>
         </div>
         <div class="w-full bg-surface-container-highest rounded-full h-1.5 overflow-hidden">
           <div class="bg-secondary h-1.5 rounded-full" :style="{ width: allowedRate === '-' ? '0%' : allowedRate }"></div>
@@ -241,28 +250,33 @@ const latencyCaption = computed(() => {
 
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
         <div class="flex items-center justify-between">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">高危威胁拦截</span>
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('dash.card.blocked') }}</span>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-error-container text-error">
-            Blocked
+            {{ t('dash.tag.blocked') }}
           </span>
         </div>
         <div class="my-space-sm">
           <div class="text-title-2 font-title-2 text-error tracking-tight mono">{{ num(stats.blocked) }}</div>
           <div class="text-caption-2 font-caption-2 text-error/80 mt-0.5">
-            占比 {{ blockedShare }} · {{ settings.block_if_below ? '低于阈值即拦截' : '高于阈值即拦截' }}
+            {{ t('dash.card.blockedCaption', {
+              share: blockedShare,
+              rule: settings.block_if_below ? t('dash.ruleBelow') : t('dash.ruleAbove'),
+            }) }}
           </div>
         </div>
-        <div class="text-caption-2 font-caption-2 text-outline">拦截逐桶趋势见下方态势图</div>
+        <div class="text-caption-2 font-caption-2 text-outline">{{ t('dash.card.blockedFoot') }}</div>
       </div>
 
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
         <div class="flex items-center justify-between">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">策略跳过与降级</span>
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('dash.card.skipped') }}</span>
           <Icon name="alt-route" class="text-outline text-[18px]" />
         </div>
         <div class="my-space-sm">
           <div class="text-title-2 font-title-2 text-on-surface tracking-tight mono">{{ num(stats.skipped) }}</div>
-          <div class="text-caption-2 font-caption-2 text-outline mt-0.5">占比 {{ skippedShare }} · 未送检直接放行</div>
+          <div class="text-caption-2 font-caption-2 text-outline mt-0.5">
+            {{ t('dash.card.skippedCaption', { share: skippedShare }) }}
+          </div>
         </div>
         <div class="w-full bg-surface-container-highest rounded-full h-1.5 overflow-hidden">
           <div class="bg-outline h-1.5 rounded-full" :style="{ width: skippedShare === '-' ? '0%' : skippedShare }"></div>
@@ -271,14 +285,16 @@ const latencyCaption = computed(() => {
 
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
         <div class="flex items-center justify-between">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">异常容灾放行</span>
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('dash.card.errors') }}</span>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-tertiary/15 text-tertiary">
-            Fail-Open
+            {{ t('dash.tag.failOpen') }}
           </span>
         </div>
         <div class="my-space-sm">
           <div class="text-title-2 font-title-2 text-tertiary tracking-tight mono">{{ num(stats.errors) }}</div>
-          <div class="text-caption-2 font-caption-2 text-on-surface-variant mt-0.5">占比 {{ errorShare }} · 检定异常或超时</div>
+          <div class="text-caption-2 font-caption-2 text-on-surface-variant mt-0.5">
+            {{ t('dash.card.errorsCaption', { share: errorShare }) }}
+          </div>
         </div>
         <div class="w-full bg-surface-container-highest rounded-full h-1.5 overflow-hidden">
           <div class="bg-tertiary h-1.5 rounded-full" :style="{ width: errorShare === '-' ? '0%' : errorShare }"></div>
@@ -289,7 +305,7 @@ const latencyCaption = computed(() => {
         <div class="flex items-center justify-between">
           <!-- 口径是整条请求的总耗时（检定 + 转发），与审计页「网关耗时」一致；
                logs 未拆分阶段，所以不叫「检定延迟」 -->
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">P99 网关耗时</span>
+          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('dash.card.latency') }}</span>
           <Icon name="gauge" class="text-primary text-[18px]" />
         </div>
         <div class="my-space-sm">
@@ -299,7 +315,7 @@ const latencyCaption = computed(() => {
             </div>
             <div class="text-caption-2 font-caption-2 text-on-surface-variant mt-0.5">{{ latencyDetail }}</div>
           </template>
-          <NotConnected v-else reason="区间内没有可统计的请求记录，无法给出延迟分位。" />
+          <NotConnected v-else :reason="t('dash.card.latencyReason')" />
         </div>
         <div class="text-caption-2 font-caption-2 text-outline">{{ latencyCaption }}</div>
       </div>
@@ -310,10 +326,10 @@ const latencyCaption = computed(() => {
       <div class="xl:col-span-7 flex flex-col p-space-lg rounded-2xl bg-surface-container shadow-lg border border-hairline">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm mb-space-md">
           <div class="flex flex-col">
-            <span class="text-title-3 font-title-3 text-on-surface">{{ range.zh }}流量与安全威胁态势</span>
+            <span class="text-title-3 font-title-3 text-on-surface">{{ t('dash.trend', { range: rangeText }) }}</span>
             <span class="text-caption-1 font-caption-1 text-outline flex items-center gap-1.5">
               <span class="h-1.5 w-1.5 rounded-full bg-secondary animate-pulse"></span>
-              刷新周期 5s · 最后刷新 {{ refreshedAt ? refreshedAt.toLocaleTimeString() : '—' }}
+              {{ t('dash.refreshCycle', { time: refreshedAt ? refreshedAt.toLocaleTimeString() : '—' }) }}
             </span>
           </div>
           <div class="inline-flex p-0.5 bg-surface-container-high rounded-lg self-start">
@@ -333,15 +349,15 @@ const latencyCaption = computed(() => {
         <div class="flex items-center gap-space-md mb-space-sm text-caption-2 font-caption-2 flex-wrap">
           <div class="flex items-center gap-1.5">
             <span class="w-2.5 h-2.5 rounded-full bg-primary"></span>
-            <span class="text-on-surface-variant">入站总请求 (Total)</span>
+            <span class="text-on-surface-variant">{{ t('dash.legend.total') }}</span>
           </div>
           <div class="flex items-center gap-1.5">
             <span class="w-2.5 h-2.5 rounded-full bg-secondary"></span>
-            <span class="text-on-surface-variant">安全放行 (Allowed)</span>
+            <span class="text-on-surface-variant">{{ t('dash.legend.allowed') }}</span>
           </div>
           <div class="flex items-center gap-1.5">
             <span class="w-2.5 h-2.5 rounded-full bg-error"></span>
-            <span class="text-on-surface-variant">越狱/攻击拦截 (Blocked)</span>
+            <span class="text-on-surface-variant">{{ t('dash.legend.blocked') }}</span>
           </div>
         </div>
 
@@ -350,16 +366,16 @@ const latencyCaption = computed(() => {
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-xs pt-space-md text-caption-1 font-caption-1 text-on-surface-variant">
           <div class="flex items-center gap-1.5" :class="loadError ? 'text-error' : ''">
             <Icon :name="loadError ? 'alert-circle' : 'check-circle'" class="text-[16px]" :class="loadError ? 'text-error' : 'text-secondary'" />
-            <span v-if="loadError">统计查询失败：{{ loadError }}</span>
+            <span v-if="loadError">{{ t('dash.trendError', { msg: loadError }) }}</span>
             <span v-else>
-              {{ range.zh }}内 放行 {{ num(stats.allowed) }} 次 · 拦截 {{ num(stats.blocked) }} 次
-              <span v-if="loading" class="text-outline">（刷新中…）</span>
+              {{ t('dash.trendSummary', { range: rangeText, allowed: num(stats.allowed), blocked: num(stats.blocked) }) }}
+              <span v-if="loading" class="text-outline">{{ t('dash.refreshing') }}</span>
             </span>
           </div>
           <span class="font-code-body text-code-body text-outline mono">
             GET /api/stats?hours={{ range.hours }}
-            <template v-if="bucketLabel"> · 每桶 {{ bucketLabel }}（由后端分桶）</template>
-            <template v-if="series.length"> · {{ series.length }} 个桶</template>
+            <template v-if="bucketLabel"> · {{ t('dash.bucketPer', { label: bucketLabel }) }}</template>
+            <template v-if="series.length"> · {{ t('dash.bucketCount', { n: series.length }) }}</template>
           </span>
         </div>
       </div>
@@ -367,9 +383,9 @@ const latencyCaption = computed(() => {
       <div class="xl:col-span-5 flex flex-col p-space-lg rounded-2xl bg-surface-container shadow-lg border border-hairline">
         <div class="flex items-center justify-between mb-space-sm">
           <div class="flex flex-col">
-            <span class="text-title-3 font-title-3 text-on-surface">风险分值分布</span>
+            <span class="text-title-3 font-title-3 text-on-surface">{{ t('dash.scoreTitle') }}</span>
             <span class="text-caption-1 font-caption-1 text-outline">
-              {{ range.zh }} · JEV noul 分值直方图（0.2 步长五档，末档含 1.0）
+              {{ t('dash.scoreSub', { range: rangeText }) }}
             </span>
           </div>
           <Icon name="donut" class="text-outline text-[20px]" />
@@ -377,13 +393,13 @@ const latencyCaption = computed(() => {
         <ScoreDistribution :counts="scoreBuckets" :unscored="unscored" :loaded="loaded" />
         <div class="flex flex-col gap-space-sm pt-space-xs">
           <div class="flex items-center justify-between text-caption-1 font-caption-1 text-on-surface-variant">
-            <span>逐条判定原因与送检摘要可在转发审计记录中查看</span>
+            <span>{{ t('dash.scoreLink') }}</span>
             <button
               type="button"
               class="inline-flex items-center gap-1 text-primary hover:underline"
               @click="router.push({ name: 'audit' })"
             >
-              查看审计
+              {{ t('dash.viewAudit') }}
               <Icon name="chevron-right" class="text-[14px]" />
             </button>
           </div>
@@ -395,12 +411,12 @@ const latencyCaption = computed(() => {
     <section class="flex flex-col gap-space-md">
       <div class="flex items-center justify-between flex-wrap gap-space-xs">
         <div class="flex items-center gap-2">
-          <span class="text-title-3 font-title-3 text-on-surface">运行实例与拓扑</span>
+          <span class="text-title-3 font-title-3 text-on-surface">{{ t('dash.topology') }}</span>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-caption-2 font-caption-2 bg-secondary/15 text-secondary">
-            单实例进程内运行
+            {{ t('dash.singleInstance') }}
           </span>
         </div>
-        <span class="text-caption-2 font-caption-2 text-outline">审计存储 SQLite (WAL) · 配置持久化于管理口进程</span>
+        <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.storage') }}</span>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-space-md">
@@ -409,28 +425,28 @@ const latencyCaption = computed(() => {
             <div class="flex items-center gap-2">
               <Icon name="server" class="text-secondary text-[20px]" />
               <div class="flex flex-col">
-                <span class="text-headline font-headline text-on-surface leading-tight">本机网关实例</span>
-                <span class="text-caption-2 font-caption-2 text-outline">进程内过滤与审计</span>
+                <span class="text-headline font-headline text-on-surface leading-tight">{{ t('dash.node') }}</span>
+                <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.nodeSub') }}</span>
               </div>
             </div>
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-secondary/15 text-secondary">
-              {{ settings.enabled ? 'Healthy' : 'Disabled' }}
+              {{ settings.enabled ? t('dash.tag.healthy') : t('dash.tag.disabled') }}
             </span>
           </div>
           <div class="grid grid-cols-2 gap-space-sm my-space-md bg-surface-container-low/70 p-space-sm rounded-xl">
             <div class="flex flex-col">
-              <span class="eyebrow">过滤开关</span>
-              <span class="text-headline font-headline text-on-surface">{{ settings.enabled ? '已启用' : '已关闭' }}</span>
+              <span class="eyebrow">{{ t('dash.nodeSwitch') }}</span>
+              <span class="text-headline font-headline text-on-surface">{{ settings.enabled ? t('dash.nodeOn') : t('dash.nodeOff') }}</span>
             </div>
             <div class="flex flex-col">
-              <span class="eyebrow">密钥池</span>
+              <span class="eyebrow">{{ t('shell.keyPool') }}</span>
               <span class="text-headline font-headline text-on-surface mono">{{ keysEnabled }} / {{ keys.length }}</span>
-              <span class="text-caption-2 font-caption-2 text-outline">启用 / 总数</span>
+              <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.nodeKeysSub') }}</span>
             </div>
           </div>
           <div class="flex items-center justify-between text-caption-2 font-caption-2 text-on-surface-variant pt-space-xs">
-            <span>检定模型</span>
-            <span class="font-code-body text-code-body text-on-surface mono truncate max-w-[10rem]">{{ settings.jev_model || '未设置' }}</span>
+            <span>{{ t('shell.jevModel') }}</span>
+            <span class="font-code-body text-code-body text-on-surface mono truncate max-w-[10rem]">{{ settings.jev_model || t('shell.notSet') }}</span>
           </div>
         </div>
 
@@ -438,18 +454,15 @@ const latencyCaption = computed(() => {
           <div class="flex items-center justify-between mb-space-sm">
             <div class="flex items-center gap-2">
               <Icon name="network" class="text-outline text-[20px]" />
-              <div class="flex flex-col">
-                <span class="text-headline font-headline text-on-surface leading-tight">多集群节点与地理分布</span>
-                <span class="text-caption-2 font-caption-2 text-outline">Cluster Topology &amp; Geo Distribution</span>
-              </div>
+              <span class="text-headline font-headline text-on-surface leading-tight">{{ t('dash.clusterTitle') }}</span>
             </div>
-            <NotConnected reason="网关为单进程部署，没有节点注册、心跳与地理调度数据。" />
+            <NotConnected :reason="t('dash.clusterTitleReason')" />
           </div>
           <div class="flex-1">
             <NotConnected
               variant="placeholder"
-              title="集群拓扑未接入"
-              reason="需要节点名册、心跳上报与地理信息采集；涉及新增后台组件，属后续 change 范围。"
+              :title="t('dash.clusterPlaceholder')"
+              :reason="t('dash.clusterPlaceholderReason')"
             />
           </div>
         </div>
@@ -466,12 +479,12 @@ const latencyCaption = computed(() => {
               <Icon name="sliders" class="text-[22px]" />
             </div>
             <div class="flex flex-col">
-              <span class="text-headline font-headline text-on-surface">调整网关安全过滤策略与规则</span>
-              <span class="text-caption-1 font-caption-1 text-outline">配置上游路由、安全判定阈值、自动拉黑与调用密钥池</span>
+              <span class="text-headline font-headline text-on-surface">{{ t('dash.ctaSettings') }}</span>
+              <span class="text-caption-1 font-caption-1 text-outline">{{ t('dash.ctaSettingsSub') }}</span>
             </div>
           </div>
           <div class="flex items-center gap-1 text-on-surface-variant group-hover:text-primary transition-colors">
-            <span class="text-caption-1 font-caption-1 font-medium">网关配置</span>
+            <span class="text-caption-1 font-caption-1 font-medium">{{ t('dash.ctaSettingsGo') }}</span>
             <Icon name="chevron-right" class="text-[18px]" />
           </div>
         </button>
@@ -486,12 +499,12 @@ const latencyCaption = computed(() => {
               <Icon name="search-check" class="text-[22px]" />
             </div>
             <div class="flex flex-col">
-              <span class="text-headline font-headline text-on-surface">实时检定流与转发审计日志</span>
-              <span class="text-caption-1 font-caption-1 text-outline">查看来源 IP、判定原因与送检内容摘要</span>
+              <span class="text-headline font-headline text-on-surface">{{ t('dash.ctaAudit') }}</span>
+              <span class="text-caption-1 font-caption-1 text-outline">{{ t('dash.ctaAuditSub') }}</span>
             </div>
           </div>
           <div class="flex items-center gap-1 text-on-surface-variant group-hover:text-secondary transition-colors">
-            <span class="text-caption-1 font-caption-1 font-medium">审计流水</span>
+            <span class="text-caption-1 font-caption-1 font-medium">{{ t('dash.ctaAuditGo') }}</span>
             <Icon name="chevron-right" class="text-[18px]" />
           </div>
         </button>

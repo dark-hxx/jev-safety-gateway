@@ -7,6 +7,7 @@
  *   GET  /api/logs   GET /api/logs/models   GET /api/stats?hours=
  *   GET  /api/stats/latency?hours=
  */
+import { t } from './i18n'
 import type {
   JEVKey,
   LatencyStats,
@@ -60,7 +61,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (res.status === 401 && !AUTH_PATHS.includes(path)) {
     clearToken()
     onUnauthorized?.()
-    throw new Error(message || '登录状态已失效，请重新登录')
+    throw new Error(message || t('api.unauthorized'))
   }
   if (!res.ok) throw new Error(message || 'HTTP ' + res.status)
   return data as T

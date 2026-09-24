@@ -6,6 +6,8 @@
  *   这里替换为等价的**系统字体栈**——不引 CDN、不内嵌字体文件、不新增网络请求。
  * - 图标：原型引用 Material Symbols 字体图标，这里替换为本地内联 SVG（components/Icon.vue）。
  * 调色板、字阶、8pt 间距体系、发丝边框与材质层级均按 DESIGN.md 落地。
+ * 调色板改为跟随主题：语义色在这里只是指向 src/style.css 中 CSS 变量的引用（见下方 `token()`），
+ * 深浅两套色值集中定义在那里，组件侧只写语义名。
  */
 
 /** 正文字体栈：优先系统上可用的优质无衬线字体，保留通用兜底。 */
@@ -60,60 +62,72 @@ for (const name of Object.keys(typeScale)) {
   fontFamilies[name] = name.startsWith('code-') ? MONO_STACK : SANS_STACK
 }
 
+/**
+ * 语义色令牌 → CSS 变量引用。
+ *
+ * 变量在 `src/style.css` 里按 `.light` / `.dark` 两组定义，值是空格分隔的 R G B 三元组；
+ * 这里保留 `<alpha-value>`，让 `bg-secondary/15`、`border-error/40` 一类透明度修饰符
+ * 仍然按 Tailwind 的写法生效。`<html>` 上的主题类由 index.html 的首屏脚本与 `src/theme.ts` 维护。
+ */
+const token = (name) => `rgb(var(--c-${name}) / <alpha-value>)`
+
 export default {
   darkMode: 'class',
   content: ['./index.html', './src/**/*.{vue,ts}'],
   theme: {
     extend: {
       colors: {
-        // —— DESIGN.md 调色板（暗色为默认模式）——
-        surface: '#121317',
-        'surface-dim': '#121317',
-        'surface-bright': '#38393d',
-        'surface-container-lowest': '#0d0e12',
-        'surface-container-low': '#1a1b1f',
-        'surface-container': '#1e1f23',
-        'surface-container-high': '#292a2e',
-        'surface-container-highest': '#343539',
-        'on-surface': '#e3e2e7',
-        'on-surface-variant': '#c1c6d7',
-        'inverse-surface': '#e3e2e7',
-        'inverse-on-surface': '#2f3034',
-        outline: '#8b90a0',
-        'outline-variant': '#414755',
-        'surface-variant': '#343539',
-        'surface-tint': '#adc6ff',
-        primary: '#adc6ff',
-        'on-primary': '#002e69',
-        'primary-container': '#4b8eff',
-        'on-primary-container': '#00285c',
-        'primary-fixed': '#d8e2ff',
-        'primary-fixed-dim': '#adc6ff',
-        'on-primary-fixed': '#001a41',
-        'on-primary-fixed-variant': '#004493',
-        'inverse-primary': '#005bc1',
-        secondary: '#53e16f',
-        'on-secondary': '#003911',
-        'secondary-container': '#05b046',
-        'on-secondary-container': '#003a11',
-        'secondary-fixed': '#72fe88',
-        'secondary-fixed-dim': '#53e16f',
-        'on-secondary-fixed': '#002107',
-        'on-secondary-fixed-variant': '#00531c',
-        tertiary: '#ffb874',
-        'on-tertiary': '#4b2800',
-        'tertiary-container': '#d47b00',
-        'on-tertiary-container': '#412200',
-        'tertiary-fixed': '#ffdcbf',
-        'tertiary-fixed-dim': '#ffb874',
-        'on-tertiary-fixed': '#2d1600',
-        'on-tertiary-fixed-variant': '#6a3b00',
-        error: '#ffb4ab',
-        'on-error': '#690005',
-        'error-container': '#93000a',
-        'on-error-container': '#ffdad6',
-        background: '#121317',
-        'on-background': '#e3e2e7',
+        // —— DESIGN.md 调色板的语义色 ——
+        // 每条都是指向 style.css 里 CSS 变量的三元组引用：深浅两套色值只在那里定义一次，
+        // 组件里只写语义名（bg-surface / text-secondary），不写 dark: 变体。
+        // <alpha-value> 让 bg-secondary/15 一类透明度修饰符继续可用。
+        surface: token('surface'),
+        'surface-dim': token('surface-dim'),
+        'surface-bright': token('surface-bright'),
+        'surface-container-lowest': token('surface-container-lowest'),
+        'surface-container-low': token('surface-container-low'),
+        'surface-container': token('surface-container'),
+        'surface-container-high': token('surface-container-high'),
+        'surface-container-highest': token('surface-container-highest'),
+        'on-surface': token('on-surface'),
+        'on-surface-variant': token('on-surface-variant'),
+        'inverse-surface': token('inverse-surface'),
+        'inverse-on-surface': token('inverse-on-surface'),
+        outline: token('outline'),
+        'outline-variant': token('outline-variant'),
+        'surface-variant': token('surface-variant'),
+        'surface-tint': token('surface-tint'),
+        primary: token('primary'),
+        'on-primary': token('on-primary'),
+        'primary-container': token('primary-container'),
+        'on-primary-container': token('on-primary-container'),
+        'primary-fixed': token('primary-fixed'),
+        'primary-fixed-dim': token('primary-fixed-dim'),
+        'on-primary-fixed': token('on-primary-fixed'),
+        'on-primary-fixed-variant': token('on-primary-fixed-variant'),
+        'inverse-primary': token('inverse-primary'),
+        secondary: token('secondary'),
+        'on-secondary': token('on-secondary'),
+        'secondary-container': token('secondary-container'),
+        'on-secondary-container': token('on-secondary-container'),
+        'secondary-fixed': token('secondary-fixed'),
+        'secondary-fixed-dim': token('secondary-fixed-dim'),
+        'on-secondary-fixed': token('on-secondary-fixed'),
+        'on-secondary-fixed-variant': token('on-secondary-fixed-variant'),
+        tertiary: token('tertiary'),
+        'on-tertiary': token('on-tertiary'),
+        'tertiary-container': token('tertiary-container'),
+        'on-tertiary-container': token('on-tertiary-container'),
+        'tertiary-fixed': token('tertiary-fixed'),
+        'tertiary-fixed-dim': token('tertiary-fixed-dim'),
+        'on-tertiary-fixed': token('on-tertiary-fixed'),
+        'on-tertiary-fixed-variant': token('on-tertiary-fixed-variant'),
+        error: token('error'),
+        'on-error': token('on-error'),
+        'error-container': token('error-container'),
+        'on-error-container': token('on-error-container'),
+        background: token('background'),
+        'on-background': token('on-background'),
       },
       fontFamily: fontFamilies,
       fontSize: typeScale,
@@ -130,13 +144,14 @@ export default {
         'space-xl': '2.25rem',
       },
       borderColor: {
-        // 发丝边框（DESIGN.md separators & fills）
-        hairline: 'rgba(255, 255, 255, 0.12)',
+        // 发丝边框（DESIGN.md separators & fills）：深浅两套取值见 style.css 的 --hairline。
+        hairline: 'var(--hairline)',
       },
       boxShadow: {
-        // DESIGN.md 材质层级：Elevation 2 的扩散阴影
-        overlay: '0 12px 32px -4px rgba(0, 0, 0, 0.48)',
-        inset: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
+        // DESIGN.md 材质层级：Elevation 2 的扩散阴影。阴影在浅色下要明显变淡，
+        // 因此与调色板一样按主题取值（见 style.css）。
+        overlay: 'var(--shadow-overlay)',
+        inset: 'var(--shadow-inset)',
       },
     },
   },

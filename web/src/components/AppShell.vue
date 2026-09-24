@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { RouterLink, useRoute } from 'vue-router'
 import Icon from './Icon.vue'
+import PreferenceBar from './PreferenceBar.vue'
 import { SCREEN_MODULES } from '../modules'
+import { useI18n } from '../i18n'
 
 /**
  * 控制台外壳：左侧固定导航 + 顶部状态条。
@@ -12,6 +14,8 @@ import { SCREEN_MODULES } from '../modules'
  * 壳层只展示**真实数据**：过滤开关状态、JEV 检定模型、密钥池数量。
  * 原型中「Engine Core v2.4.1-rc」「Apple HIG Spec」一类无来源信息已移除，
  * 版本/构建信息缺口见 docs/admin-console-backend-gaps.md。
+ *
+ * 界面语言由 `i18n` 提供：每个标题只显示**当前语言**的一条（中英不再同屏并排）。
  */
 defineProps<{
   enabled: boolean
@@ -27,6 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const route = useRoute()
+const { t, localized } = useI18n()
 
 const linkClass =
   'w-full text-left flex items-center gap-space-sm px-space-sm py-2 rounded-lg transition-all'
@@ -47,13 +52,13 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
             <Icon name="shield-check" class="text-[18px]" />
           </div>
           <div class="flex flex-col">
-            <span class="text-headline font-headline text-on-surface tracking-tight leading-tight">JEV Safety Gateway</span>
-            <span class="text-caption-2 font-caption-2 text-outline leading-tight">AI Safety Control</span>
+            <span class="text-headline font-headline text-on-surface tracking-tight leading-tight">{{ t('app.name') }}</span>
+            <span class="text-caption-2 font-caption-2 text-outline leading-tight">{{ t('app.tagline') }}</span>
           </div>
         </div>
 
         <div class="px-space-md pt-space-xs">
-          <span class="eyebrow">导航 Navigation</span>
+          <span class="eyebrow">{{ t('nav.section') }}</span>
         </div>
 
         <nav class="flex flex-col gap-space-xs px-space-sm">
@@ -65,10 +70,7 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
             :aria-current="route.name === item.name ? 'page' : undefined"
           >
             <Icon :name="item.icon" class="text-[16px] shrink-0" />
-            <span class="flex flex-col leading-tight">
-              <span>{{ item.title.zh }}</span>
-              <span class="text-caption-2 font-caption-2 text-outline">{{ item.title.en }}</span>
-            </span>
+            <span>{{ localized(item.title) }}</span>
           </RouterLink>
         </nav>
       </div>
@@ -76,22 +78,24 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
       <div class="px-space-md flex flex-col gap-space-sm">
         <div class="p-space-sm rounded-xl bg-surface-container-high flex flex-col gap-space-xs">
           <div class="flex items-center justify-between text-caption-2 font-caption-2 text-on-surface-variant">
-            <span>检定模型</span>
+            <span>{{ t('shell.jevModel') }}</span>
             <span class="font-code-badge text-code-badge text-primary truncate max-w-[7rem]" :title="jevModel">
-              {{ jevModel || '未设置' }}
+              {{ jevModel || t('shell.notSet') }}
             </span>
           </div>
           <div class="flex items-center gap-space-xs text-caption-1 font-caption-1 text-on-surface">
             <span class="h-1.5 w-1.5 rounded-full" :class="enabled ? 'bg-secondary' : 'bg-outline'"></span>
-            <span>{{ enabled ? '过滤已启用' : '过滤已关闭' }}</span>
+            <span>{{ enabled ? t('shell.filterOn') : t('shell.filterOff') }}</span>
           </div>
           <div class="flex items-center justify-between text-caption-2 font-caption-2 text-on-surface-variant">
-            <span>密钥池</span>
-            <span class="font-code-body text-code-body text-on-surface">{{ keysEnabled }} / {{ keysTotal }} 启用</span>
+            <span>{{ t('shell.keyPool') }}</span>
+            <span class="font-code-body text-code-body text-on-surface">
+              {{ t('shell.keysCount', { enabled: keysEnabled, total: keysTotal }) }}
+            </span>
           </div>
         </div>
         <div class="flex items-center justify-between text-caption-2 font-caption-2 text-outline px-space-xs">
-          <span>离线资源 · 无公网依赖</span>
+          <span>{{ t('shell.offline') }}</span>
           <span>go:embed</span>
         </div>
       </div>
@@ -108,11 +112,11 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
                 :class="enabled ? 'bg-secondary animate-pulse' : 'bg-outline'"
               ></span>
               <span class="text-caption-2 font-caption-2" :class="enabled ? 'text-secondary' : 'text-outline'">
-                {{ enabled ? '已启用过滤 · Filtering Active' : '过滤已关闭 · Filtering Off' }}
+                {{ enabled ? t('shell.filteringActive') : t('shell.filteringOff') }}
               </span>
             </div>
             <div class="flex items-center gap-2 pl-space-xs">
-              <span class="text-caption-2 font-caption-2 text-on-surface-variant">主网关防护</span>
+              <span class="text-caption-2 font-caption-2 text-on-surface-variant">{{ t('shell.masterSwitch') }}</span>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input
                   class="sr-only peer"
@@ -128,14 +132,16 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
             </div>
           </div>
 
-          <div class="flex items-center gap-space-md">
+          <div class="flex items-center gap-space-sm">
+            <PreferenceBar />
+            <div class="w-px h-6 bg-hairline"></div>
             <button
               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container hover:bg-surface-container-high text-subheadline font-subheadline text-on-surface transition-all"
               type="button"
               @click="emit('logout')"
             >
               <Icon name="logout" class="text-[16px]" />
-              <span>退出</span>
+              <span>{{ t('shell.logout') }}</span>
             </button>
             <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
               <Icon name="person" class="text-on-primary text-[18px]" />

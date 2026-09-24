@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html class="dark" lang="zh-CN">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,9 +9,37 @@
     -->
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23adc6ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l7 3v5.5c0 4.2-2.9 7.9-7 9.5-4.1-1.6-7-5.3-7-9.5V6z'/%3E%3Cpath d='M9.2 12.2l2 2 3.6-3.9'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b8eff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l7 3v5.5c0 4.2-2.9 7.9-7 9.5-4.1-1.6-7-5.3-7-9.5V6z'/%3E%3Cpath d='M9.2 12.2l2 2 3.6-3.9'/%3E%3C/svg%3E"
     />
-    <title>JEV 安全网关控制台</title>
+    <!--
+      首屏主题/语言：必须在 CSS 生效前同步挂类，否则「跟随系统」的浅色用户会先看到一帧暗色
+      （或反之）。这是唯一一处与 src/theme.ts、src/i18n/index.ts 重复读存储的地方，
+      三个文件的键名必须一致；此处解析出的主题与 theme.ts 的 resolved 语义相同。
+      脚本失败（存储被禁用等）时退回跟随系统偏好的浅/深档，界面照常可用。
+    -->
+    <script>
+      (function () {
+        var root = document.documentElement
+        // 读存储单独兜一层：隐私模式下 localStorage 会抛，但系统偏好仍可读，
+        // 「默认跟随系统」这一条不应因为存不了偏好就失效。
+        var mode = 'system'
+        try {
+          var saved = localStorage.getItem('jev-console-theme')
+          if (saved === 'light' || saved === 'dark' || saved === 'system') mode = saved
+        } catch (e) {}
+        var prefersDark = false
+        try {
+          prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+        } catch (e) {}
+        var dark = mode === 'dark' || (mode === 'system' && prefersDark)
+        root.classList.add(dark ? 'dark' : 'light')
+        root.style.colorScheme = dark ? 'dark' : 'light'
+        try {
+          if (localStorage.getItem('jev-console-locale') === 'en') root.lang = 'en'
+        } catch (e) {}
+      })()
+    </script>
+    <title>JEV Safety Gateway</title>
   </head>
   <body class="bg-surface font-body text-on-surface antialiased">
     <div id="app"></div>

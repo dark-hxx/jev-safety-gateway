@@ -1,3 +1,5 @@
+import { t } from './i18n'
+import type { MessageKey } from './i18n/zh'
 import type { Decision } from './types'
 
 /** 千分位整数。 */
@@ -38,27 +40,27 @@ export function dateTimeOf(ts: string): string {
 
 /** 相对时间，用于「最近使用」一类展示。 */
 export function relativeOf(ts?: string): string {
-  if (!ts) return '从未使用'
+  if (!ts) return t('time.never')
   const d = new Date(ts)
   if (Number.isNaN(d.getTime())) return '-'
   const diff = Date.now() - d.getTime()
   if (diff < 0) return dateTimeOf(ts)
   const min = Math.floor(diff / 60000)
-  if (min < 1) return '刚刚'
-  if (min < 60) return `${min} 分钟前`
+  if (min < 1) return t('time.justNow')
+  if (min < 60) return t('time.minutesAgo', { n: min })
   const hour = Math.floor(min / 60)
-  if (hour < 24) return `${hour} 小时前`
+  if (hour < 24) return t('time.hoursAgo', { n: hour })
   const day = Math.floor(hour / 24)
-  if (day < 30) return `${day} 天前`
+  if (day < 30) return t('time.daysAgo', { n: day })
   return dateTimeOf(ts)
 }
 
 /** 秒 → 人类可读时长，用于封禁时长等既有设置项的回显。 */
 export function durationOf(sec: number): string {
-  if (sec >= 86400 && sec % 86400 === 0) return `${sec / 86400} 天`
-  if (sec >= 3600 && sec % 3600 === 0) return `${sec / 3600} 小时`
-  if (sec >= 60 && sec % 60 === 0) return `${sec / 60} 分钟`
-  return `${sec} 秒`
+  if (sec >= 86400 && sec % 86400 === 0) return t('duration.days', { n: sec / 86400 })
+  if (sec >= 3600 && sec % 3600 === 0) return t('duration.hours', { n: sec / 3600 })
+  if (sec >= 60 && sec % 60 === 0) return t('duration.minutes', { n: sec / 60 })
+  return t('duration.seconds', { n: sec })
 }
 
 /** 百分比（一位小数），分母为 0 时返回 null 以便调用方降级。 */
@@ -75,10 +77,13 @@ export function pctText(part: number, whole: number): string {
 // --- 判定状态的展示映射（与 LogEntry.decision 取值一致）---
 
 export interface DecisionStyle {
-  /** 中文主标签。 */
+  /** 主标签，随界面语言变化。 */
   label: string
-  /** 原型中的英文副标签。 */
-  en: string
+  /**
+   * 机器码（ALLOWED / BLOCKED / SKIPPED / FAIL_OPEN）。它是判定状态的稳定标识，
+   * 与 HTTP 方法、接口路径同类，因此**不随界面语言变化**。
+   */
+  code: string
   /** 前景文字色 class。 */
   text: string
   /** 徽章底色 + 文字色 class。 */
@@ -89,34 +94,39 @@ export interface DecisionStyle {
   bar: string
 }
 
-const DECISION_STYLES: Record<string, DecisionStyle> = {
+/** 配色与机器码是静态的；只有 `label` 需要按当前语言求值，故用 getter 延迟到渲染时取。 */
+interface DecisionSpec extends Omit<DecisionStyle, 'label'> {
+  labelKey: MessageKey
+}
+
+const DECISION_SPECS: Record<string, DecisionSpec> = {
   allow: {
-    label: '放行',
-    en: 'ALLOWED',
+    labelKey: 'decision.allow',
+    code: 'ALLOWED',
     text: 'text-secondary',
     badge: 'bg-secondary-container/30 text-secondary',
     dot: 'bg-secondary',
     bar: 'bg-secondary',
   },
   block: {
-    label: '拦截',
-    en: 'BLOCKED',
+    labelKey: 'decision.block',
+    code: 'BLOCKED',
     text: 'text-error',
     badge: 'bg-error-container text-error',
     dot: 'bg-error',
     bar: 'bg-error',
   },
   skip: {
-    label: '跳过',
-    en: 'SKIPPED',
+    labelKey: 'decision.skip',
+    code: 'SKIPPED',
     text: 'text-on-surface-variant',
     badge: 'bg-surface-bright text-on-surface',
     dot: 'bg-outline',
     bar: 'bg-outline',
   },
   error: {
-    label: '错误',
-    en: 'FAIL_OPEN',
+    labelKey: 'decision.error',
+    code: 'FAIL_OPEN',
     text: 'text-tertiary',
     badge: 'bg-tertiary-container/30 text-tertiary',
     dot: 'bg-tertiary',
@@ -124,17 +134,30 @@ const DECISION_STYLES: Record<string, DecisionStyle> = {
   },
 }
 
-const UNKNOWN_STYLE: DecisionStyle = {
-  label: '未知',
-  en: 'UNKNOWN',
+const UNKNOWN_SPEC: DecisionSpec = {
+  labelKey: 'decision.unknown',
+  code: 'UNKNOWN',
   text: 'text-outline',
   badge: 'bg-surface-container-high text-on-surface-variant',
   dot: 'bg-outline',
   bar: 'bg-outline',
 }
 
+function styleOf(spec: DecisionSpec): DecisionStyle {
+  return {
+    get label() {
+      return t(spec.labelKey)
+    },
+    code: spec.code,
+    text: spec.text,
+    badge: spec.badge,
+    dot: spec.dot,
+    bar: spec.bar,
+  }
+}
+
 export function decisionStyle(d: Decision | string): DecisionStyle {
-  return DECISION_STYLES[d] ?? UNKNOWN_STYLE
+  return styleOf(DECISION_SPECS[d] ?? UNKNOWN_SPEC)
 }
 
 /** HTTP 方法徽章色：POST/PUT/PATCH 走高亮，其余走中性。 */

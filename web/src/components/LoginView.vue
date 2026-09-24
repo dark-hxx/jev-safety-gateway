@@ -2,7 +2,9 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import Icon from './Icon.vue'
 import NotConnected from './NotConnected.vue'
+import PreferenceBar from './PreferenceBar.vue'
 import * as api from '../api'
+import { useI18n } from '../i18n'
 
 /**
  * 登录 / 初始配置视图（原型 `jev_3`）。
@@ -20,7 +22,10 @@ import * as api from '../api'
  *   鉴权前拿不到审计日志派生的延迟分位（那属于受保护数据，见控制台驾驶舱），
  *   而这个往返耗时是登录页唯一能给出的真实延迟，且不泄露服务端遥测；
  * - 不标注口令哈希算法（原型为 SHA-256，曾改为 bcrypt，现按要求整体移除）；
- * - 不呈现「保持本工作站受信任凭据 (24h)」勾选项，也不提供语言切换。
+ * - 不呈现「保持本工作站受信任凭据 (24h)」勾选项。
+ *
+ * 鉴权前也要能用外观与语言开关（PreferenceBar 固定在右上角）：语言偏好落在 localStorage，
+ * 登录成功后界面语言不会跳变，因此登录视图自身的文案也全部走 `t()`。
  *
  * 登录与初始设置的行为与既有接口语义保持一致：`GET /api/setup-status` 决定模式、
  * 初始设置校验口令长度与两次输入一致性、`POST /api/setup` / `POST /api/login`
@@ -28,6 +33,8 @@ import * as api from '../api'
  */
 const props = defineProps<{ needsSetup: boolean; initialError?: string }>()
 const emit = defineEmits<{ (e: 'authenticated'): void }>()
+
+const { t } = useI18n()
 
 const pw = ref('')
 const pw2 = ref('')
@@ -56,13 +63,13 @@ onMounted(() => pwInput.value?.focus())
 
 const setupMode = computed(() => props.needsSetup)
 
-const title = 'JEV 安全网关'
-const subtitle = 'AI Request Security & Filtering Gateway'
+const title = computed(() => t('login.title'))
+const subtitle = computed(() => t('login.subtitle'))
 const statusText = computed(() =>
-  setupMode.value ? '首次使用：请设置管理员口令（至少 6 位）' : '输入管理员口令以访问控制台',
+  setupMode.value ? t('login.statusSetup') : t('login.statusLogin'),
 )
 /** 右侧元信息：仅保留初始配置时的口令长度约束，不标注哈希算法。 */
-const passMeta = computed(() => (setupMode.value ? '至少 6 位' : ''))
+const passMeta = computed(() => (setupMode.value ? t('login.passMeta') : ''))
 
 /**
  * 系统信息：构建标识与监听地址来自免鉴权的 `GET /api/version`，往返耗时由本次请求
@@ -103,13 +110,13 @@ async function submit(): Promise<void> {
   busy.value = true
   try {
     if (setupMode.value) {
-      if (password.length < 6) throw new Error('口令至少 6 位')
-      if (password !== pw2.value) throw new Error('两次输入不一致')
+      if (password.length < 6) throw new Error(t('login.err.pwShort'))
+      if (password !== pw2.value) throw new Error(t('login.err.pwMismatch'))
       await api.setup(password)
-      showToast('网关密钥已初始化并激活', true)
+      showToast(t('login.ok.setup'), true)
     } else {
       await api.login(password)
-      showToast('验证通过，正在载入安全控制台…', true)
+      showToast(t('login.ok.login'), true)
     }
     pw.value = ''
     pw2.value = ''
@@ -138,6 +145,11 @@ async function onPwEnter(): Promise<void> {
       <div class="absolute w-96 h-96 rounded-full bg-primary-container/10 blur-3xl pointer-events-none -top-16 -left-16"></div>
       <div class="absolute w-80 h-80 rounded-full bg-secondary-container/10 blur-3xl pointer-events-none -bottom-10 -right-10"></div>
 
+      <!-- 外观与语言开关：鉴权前也可用，因此不放在卡片里 -->
+      <div class="fixed top-space-md right-space-md z-50">
+        <PreferenceBar />
+      </div>
+
       <!-- 顶部工具条：版本徽标 + 认证模式分段控件 -->
       <div class="w-full max-w-[440px] flex items-center justify-between gap-space-sm mb-space-lg px-space-xs z-10">
         <div class="flex items-center gap-space-xs text-on-surface-variant min-w-0">
@@ -146,8 +158,8 @@ async function onPwEnter(): Promise<void> {
           <span v-if="versionText" class="font-code-badge text-code-badge tracking-tight">{{ versionText }}</span>
           <NotConnected
             v-else
-            title="版本未接入"
-            reason="未能从 GET /api/version 读取构建信息，控制台无法显示自身版本号。"
+            :title="t('login.versionMissing')"
+            :reason="t('login.versionMissingReason')"
           />
         </div>
 
@@ -164,7 +176,7 @@ async function onPwEnter(): Promise<void> {
             :aria-pressed="!setupMode"
           >
             <Icon name="login" class="text-[13px]" />
-            <span>验证登录</span>
+            <span>{{ t('login.modeLogin') }}</span>
           </button>
           <button
             type="button"
@@ -178,7 +190,7 @@ async function onPwEnter(): Promise<void> {
             :aria-pressed="setupMode"
           >
             <Icon name="key" class="text-[13px]" />
-            <span>初始配置</span>
+            <span>{{ t('login.modeSetup') }}</span>
           </button>
         </div>
       </div>
@@ -217,7 +229,7 @@ async function onPwEnter(): Promise<void> {
           <div class="flex flex-col gap-1.5">
             <div class="flex justify-between items-center px-1">
               <label class="font-caption-1 text-caption-1 text-on-surface-variant font-medium" for="adminPass">
-                管理员主口令
+                {{ t('login.adminPass') }}
               </label>
               <span v-if="passMeta" class="font-code-badge text-code-badge text-on-surface-variant/70">{{ passMeta }}</span>
             </div>
@@ -239,8 +251,8 @@ async function onPwEnter(): Promise<void> {
               <button
                 type="button"
                 class="absolute right-2.5 text-outline hover:text-on-surface transition-colors p-1 flex items-center justify-center"
-                :title="showPw ? '隐藏口令' : '显示口令'"
-                :aria-label="showPw ? '隐藏口令' : '显示口令'"
+                :title="showPw ? t('login.hidePw') : t('login.showPw')"
+                :aria-label="showPw ? t('login.hidePw') : t('login.showPw')"
                 tabindex="-1"
                 @click="showPw = !showPw"
               >
@@ -253,9 +265,9 @@ async function onPwEnter(): Promise<void> {
           <div v-if="setupMode" class="flex flex-col gap-1.5">
             <div class="flex justify-between items-center px-1">
               <label class="font-caption-1 text-caption-1 text-on-surface-variant font-medium" for="confirmPass">
-                重复确认新口令
+                {{ t('login.confirmPass') }}
               </label>
-              <span class="font-code-badge text-code-badge text-tertiary">至少 6 位字符</span>
+              <span class="font-code-badge text-code-badge text-tertiary">{{ t('login.confirmHint') }}</span>
             </div>
             <div
               class="relative flex items-center bg-surface-container-high rounded-lg transition-all focus-within:bg-surface-container-highest shadow-inner"
@@ -274,8 +286,8 @@ async function onPwEnter(): Promise<void> {
               <button
                 type="button"
                 class="absolute right-2.5 text-outline hover:text-on-surface transition-colors p-1 flex items-center justify-center"
-                :title="showPw2 ? '隐藏口令' : '显示口令'"
-                :aria-label="showPw2 ? '隐藏口令' : '显示口令'"
+                :title="showPw2 ? t('login.hidePw') : t('login.showPw')"
+                :aria-label="showPw2 ? t('login.hidePw') : t('login.showPw')"
                 tabindex="-1"
                 @click="showPw2 = !showPw2"
               >
@@ -287,10 +299,10 @@ async function onPwEnter(): Promise<void> {
           <!-- 主按钮 -->
           <button
             type="submit"
-            class="w-full mt-space-sm bg-primary-container text-on-primary font-headline text-headline py-2.5 px-space-md rounded-lg shadow-md hover:opacity-95 active:scale-[0.99] transition duration-150 flex items-center justify-center gap-space-xs font-semibold disabled:opacity-60"
+            class="w-full mt-space-sm bg-primary-container text-on-primary-container font-headline text-headline py-2.5 px-space-md rounded-lg shadow-md hover:opacity-95 active:scale-[0.99] transition duration-150 flex items-center justify-center gap-space-xs font-semibold disabled:opacity-60"
             :disabled="busy"
           >
-            <span>{{ busy ? '处理中…' : setupMode ? '完成设置并进入' : '登录控制台' }}</span>
+            <span>{{ busy ? t('login.busy') : setupMode ? t('login.submitSetup') : t('login.submitLogin') }}</span>
             <Icon name="arrow-right" class="text-[19px]" />
           </button>
         </form>
@@ -300,36 +312,41 @@ async function onPwEnter(): Promise<void> {
           <div class="flex items-center gap-2 px-space-md py-1 rounded-full bg-surface-container-high/90 text-on-surface shadow-sm">
             <span class="w-2 h-2 rounded-full bg-secondary animate-pulse shrink-0"></span>
             <span class="font-code-badge text-code-badge tracking-tight text-on-surface-variant">
-              管理服务已连接
+              {{ t('login.daemon') }}
             </span>
             <span v-if="proxyAddr" class="font-code-badge text-code-badge tracking-tight text-outline">{{ proxyAddr }}</span>
             <NotConnected
               v-else
-              title="地址未接入"
-              reason="未能从 GET /api/version 读取监听地址。"
+              :title="t('login.addrMissing')"
+              :reason="t('login.addrMissingReason')"
             />
           </div>
 
-          <!-- 安全标语为静态文案；延迟是本次到网关的实测往返耗时 -->
+          <!-- 安全标语与版本行随界面语言切换（文案见 i18n 的 login.tag.* / login.footer）；
+               延迟是本次到网关的实测往返耗时 -->
           <div class="w-full flex items-center justify-between pt-space-sm text-on-surface-variant/60 font-code-badge text-[10px]">
             <span class="flex items-center gap-1">
               <Icon name="memory" class="text-[13px]" />
-              <span v-if="latencyText" title="本次控制台到网关的往返耗时">{{ latencyText }}</span>
-              <NotConnected v-else title="延迟未接入" reason="未能完成一次到网关的请求，无法给出往返耗时。" />
+              <span v-if="latencyText" :title="t('login.latencyTitle')">{{ latencyText }}</span>
+              <NotConnected
+                v-else
+                :title="t('login.latencyMissing')"
+                :reason="t('login.latencyMissingReason')"
+              />
             </span>
             <span class="flex items-center gap-1">
               <Icon name="encrypted" class="text-[13px] text-primary" />
-              ZERO-TRUST TLS
+              {{ t('login.tag.tls') }}
             </span>
             <span class="flex items-center gap-1">
               <Icon name="rule" class="text-[13px] text-tertiary" />
-              PII SHIELD ACTIVE
+              {{ t('login.tag.pii') }}
             </span>
           </div>
         </div>
 
         <div class="mt-space-lg text-center font-caption-2 text-caption-2 text-on-surface-variant/60">
-          Typesafe AI / JEV Core Protected
+          {{ t('login.footer') }}
         </div>
       </div>
 

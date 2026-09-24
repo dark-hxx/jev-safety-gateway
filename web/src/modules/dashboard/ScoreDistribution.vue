@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { num } from '../../format'
+import { useI18n } from '../../i18n'
 
 /**
  * 「风险分值分布」直方图。
@@ -20,14 +21,19 @@ const props = defineProps<{
   loaded: boolean
 }>()
 
-/** 档位标签与配色：低分侧警示，高分侧安全。 */
+const { t } = useI18n()
+
+/**
+ * 档位标签与配色：低分侧警示，高分侧安全。
+ * 两端各有一句提示（`hintKey`），中间三档不标注——只给首尾点出方向即可。
+ */
 const SLOTS = [
-  { label: '0.0 – 0.2', hint: '最可疑', bar: 'bg-error', text: 'text-error' },
-  { label: '0.2 – 0.4', hint: '', bar: 'bg-error/70', text: 'text-error' },
-  { label: '0.4 – 0.6', hint: '', bar: 'bg-tertiary', text: 'text-tertiary' },
-  { label: '0.6 – 0.8', hint: '', bar: 'bg-secondary/70', text: 'text-secondary' },
-  { label: '0.8 – 1.0', hint: '最安全（含 1.0）', bar: 'bg-secondary', text: 'text-secondary' },
-]
+  { label: '0.0 – 0.2', hintKey: 'score.hintLow', bar: 'bg-error', text: 'text-error' },
+  { label: '0.2 – 0.4', hintKey: '', bar: 'bg-error/70', text: 'text-error' },
+  { label: '0.4 – 0.6', hintKey: '', bar: 'bg-tertiary', text: 'text-tertiary' },
+  { label: '0.6 – 0.8', hintKey: '', bar: 'bg-secondary/70', text: 'text-secondary' },
+  { label: '0.8 – 1.0', hintKey: 'score.hintHigh', bar: 'bg-secondary', text: 'text-secondary' },
+] as const
 
 /** 有分值的样本量，即五档之和；占比的分母。 */
 const sample = computed(() => props.counts.reduce((a, b) => a + (b || 0), 0))
@@ -39,6 +45,7 @@ const rows = computed(() =>
     const count = props.counts[i] ?? 0
     return {
       ...s,
+      hint: s.hintKey ? t(s.hintKey) : '',
       count,
       width: (count / maxCount.value) * 100,
       share: sample.value > 0 ? `${((count / sample.value) * 100).toFixed(1)}%` : '-',
@@ -56,7 +63,7 @@ const unscoredShare = computed(() =>
 <template>
   <div class="flex-1 flex flex-col justify-center gap-space-sm my-space-sm">
     <div v-if="!loaded" class="h-40 flex items-center justify-center">
-      <span class="text-caption-1 font-caption-1 text-outline">正在读取统计…</span>
+      <span class="text-caption-1 font-caption-1 text-outline">{{ t('common.loadingStats') }}</span>
     </div>
 
     <div v-else class="flex flex-col gap-space-sm">
@@ -79,7 +86,7 @@ const unscoredShare = computed(() =>
       <div class="flex items-center justify-between text-caption-2 font-caption-2 pt-space-xs border-t border-hairline">
         <div class="flex items-center gap-1.5">
           <span class="w-2 h-2 rounded-full bg-outline"></span>
-          <span class="text-on-surface-variant">无分值（JEV 未返回分值）</span>
+          <span class="text-on-surface-variant">{{ t('score.unscored') }}</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <span class="mono text-on-surface-variant">{{ num(props.unscored) }}</span>
@@ -88,7 +95,7 @@ const unscoredShare = computed(() =>
       </div>
 
       <div class="text-caption-2 font-caption-2 text-outline leading-relaxed">
-        样本量 {{ num(sample) }} 条有分值记录 · 统计口径为区间内全部已送检记录（含放行与拦截），非仅拦截记录
+        {{ t('score.sample', { n: num(sample) }) }}
       </div>
     </div>
   </div>

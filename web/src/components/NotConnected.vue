@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import Icon from './Icon.vue'
+import { useI18n } from '../i18n'
 
 /**
  * 「未接入」标注。用于原型中出现、但当前后端没有数据来源或接口的元素。
@@ -9,27 +11,35 @@ import Icon from './Icon.vue'
  * - `placeholder`：占位块，保留原型中该区域的形状与尺寸，但不绘制任何无来源数值。
  *
  * 两者都**不显示任何数值**，只说明缺口与后续计划。
+ *
+ * `title` / `reason` 由调用方按当前界面语言传入（`t(...)`）；缺省时的兜底文案同样走文案表，
+ * 因此这里不放任何字面量。
  */
-withDefaults(
+const props = withDefaults(
   defineProps<{
     variant?: 'badge' | 'placeholder'
-    /** 占位块标题，默认「未接入」。 */
+    /** 占位块标题；缺省为「未接入」。 */
     title?: string
     /** 缺口说明：为什么没有数据、后续由谁补。 */
     reason?: string
   }>(),
-  { variant: 'badge', title: '未接入', reason: '' },
+  { variant: 'badge' },
 )
+
+const { t } = useI18n()
+
+const label = computed(() => props.title || t('notconnected.label'))
+const tip = computed(() => props.reason || t('notconnected.tip'))
 </script>
 
 <template>
   <span
     v-if="variant === 'badge'"
     class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary-container/20 text-tertiary text-code-badge font-code-badge whitespace-nowrap"
-    :title="reason || '当前后端无对应数据来源，详见 docs/admin-console-backend-gaps.md'"
+    :title="tip"
   >
     <Icon name="info" class="text-[11px]" />
-    {{ title }}
+    {{ label }}
   </span>
 
   <div
@@ -38,7 +48,7 @@ withDefaults(
   >
     <Icon name="info" class="text-tertiary text-[20px]" />
     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary-container/20 text-tertiary text-code-badge font-code-badge">
-      {{ title }}
+      {{ label }}
     </span>
     <span v-if="reason" class="text-caption-2 font-caption-2 text-outline max-w-md leading-relaxed">
       {{ reason }}

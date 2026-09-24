@@ -6,6 +6,131 @@
  * 基础样式：DESIGN.md 的「材质层级」与「发丝边框」在 CSS 层落地。
  * 不引 CDN、不内嵌字体文件；字体由 tailwind.config.js 的系统字体栈提供。
  */
+
+/*
+ * 主题调色板以 CSS 变量落地，供 tailwind.config.js 的语义色（`bg-surface`、`text-primary` …）
+ * 引用。这样组件里只写一套语义 class，深浅两套色值只在这里出现一次。
+ *
+ * - `:root`（= 浅色默认）与 `.light` 同值：`<html>` 上的类由 index.html 的首屏脚本或
+ *   `src/theme.ts` 挂载；`dark` 类在下方覆盖。
+ * - 变量值是**空格分隔的 R G B 三元组**而不是颜色字面量：Tailwind 的 `<alpha-value>`
+ *   需要这种形式才能让 `bg-secondary/15`、`border-hairline` 这类透明度修饰符正常工作。
+ * - 两套调色板同一份 M3 色板（蓝主色 / 绿辅色 / 橙强调色）的深浅两档，
+ *   语义对应关系不变：primary 是主色，secondary 表示「放行 / 安全」，error 表示「拦截」。
+ */
+:root,
+.light {
+  --c-surface: 251 251 254;
+  --c-surface-dim: 218 217 224;
+  --c-surface-bright: 251 251 254;
+  --c-surface-container-lowest: 255 255 255;
+  --c-surface-container-low: 245 244 250;
+  --c-surface-container: 239 237 244;
+  --c-surface-container-high: 233 231 239;
+  --c-surface-container-highest: 227 225 232;
+  --c-on-surface: 26 27 32;
+  --c-on-surface-variant: 68 70 79;
+  --c-inverse-surface: 47 48 51;
+  --c-inverse-on-surface: 241 240 244;
+  /* M3 outline 原值（#74777F）只在纯 surface 上刚到 4.5:1；控制台里占多数的
+     小号 eyebrow / 降级标签其实落在更深的 surface-container 上，实测只有 3.7:1。
+     这里按容器底色压深一档，让浅色下的低强调文字与深色档的对比度处在同一水平。 */
+  --c-outline: 100 103 111;
+  --c-outline-variant: 196 198 208;
+  --c-surface-variant: 225 225 236;
+  --c-surface-tint: 0 90 193;
+  --c-primary: 0 90 193;
+  --c-on-primary: 255 255 255;
+  --c-primary-container: 216 226 255;
+  --c-on-primary-container: 0 26 65;
+  --c-primary-fixed: 216 226 255;
+  --c-primary-fixed-dim: 173 198 255;
+  --c-on-primary-fixed: 0 26 65;
+  --c-on-primary-fixed-variant: 0 68 147;
+  --c-inverse-primary: 173 198 255;
+  --c-secondary: 0 110 28;
+  --c-on-secondary: 255 255 255;
+  --c-secondary-container: 111 220 124;
+  --c-on-secondary-container: 0 34 4;
+  --c-secondary-fixed: 114 254 136;
+  --c-secondary-fixed-dim: 83 225 111;
+  --c-on-secondary-fixed: 0 33 7;
+  --c-on-secondary-fixed-variant: 0 83 28;
+  --c-tertiary: 138 83 0;
+  --c-on-tertiary: 255 255 255;
+  --c-tertiary-container: 255 220 191;
+  --c-on-tertiary-container: 45 22 0;
+  --c-tertiary-fixed: 255 220 191;
+  --c-tertiary-fixed-dim: 255 184 116;
+  --c-on-tertiary-fixed: 45 22 0;
+  --c-on-tertiary-fixed-variant: 106 59 0;
+  --c-error: 186 26 26;
+  --c-on-error: 255 255 255;
+  --c-error-container: 255 218 214;
+  --c-on-error-container: 65 0 2;
+  --c-background: 251 251 254;
+  --c-on-background: 26 27 32;
+
+  /* 发丝边框：深色下是「白色提亮」，浅色下必须换成「黑色压暗」，否则边框会消失。 */
+  --hairline: rgba(0, 0, 0, 0.12);
+  --shadow-overlay: 0 12px 32px -4px rgb(0 0 0 / 0.16);
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.9);
+}
+
+.dark {
+  --c-surface: 18 19 23;
+  --c-surface-dim: 18 19 23;
+  --c-surface-bright: 56 57 61;
+  --c-surface-container-lowest: 13 14 18;
+  --c-surface-container-low: 26 27 31;
+  --c-surface-container: 30 31 35;
+  --c-surface-container-high: 41 42 46;
+  --c-surface-container-highest: 52 53 57;
+  --c-on-surface: 227 226 231;
+  --c-on-surface-variant: 193 198 215;
+  --c-inverse-surface: 227 226 231;
+  --c-inverse-on-surface: 47 48 52;
+  --c-outline: 139 144 160;
+  --c-outline-variant: 65 71 85;
+  --c-surface-variant: 52 53 57;
+  --c-surface-tint: 173 198 255;
+  --c-primary: 173 198 255;
+  --c-on-primary: 0 46 105;
+  --c-primary-container: 75 142 255;
+  --c-on-primary-container: 0 40 92;
+  --c-primary-fixed: 216 226 255;
+  --c-primary-fixed-dim: 173 198 255;
+  --c-on-primary-fixed: 0 26 65;
+  --c-on-primary-fixed-variant: 0 68 147;
+  --c-inverse-primary: 0 91 193;
+  --c-secondary: 83 225 111;
+  --c-on-secondary: 0 57 17;
+  --c-secondary-container: 5 176 70;
+  --c-on-secondary-container: 0 58 17;
+  --c-secondary-fixed: 114 254 136;
+  --c-secondary-fixed-dim: 83 225 111;
+  --c-on-secondary-fixed: 0 33 7;
+  --c-on-secondary-fixed-variant: 0 83 28;
+  --c-tertiary: 255 184 116;
+  --c-on-tertiary: 75 40 0;
+  --c-tertiary-container: 212 123 0;
+  --c-on-tertiary-container: 65 34 0;
+  --c-tertiary-fixed: 255 220 191;
+  --c-tertiary-fixed-dim: 255 184 116;
+  --c-on-tertiary-fixed: 45 22 0;
+  --c-on-tertiary-fixed-variant: 106 59 0;
+  --c-error: 255 180 171;
+  --c-on-error: 105 0 5;
+  --c-error-container: 147 0 10;
+  --c-on-error-container: 255 218 214;
+  --c-background: 18 19 23;
+  --c-on-background: 227 226 231;
+
+  --hairline: rgba(255, 255, 255, 0.12);
+  --shadow-overlay: 0 12px 32px -4px rgb(0 0 0 / 0.48);
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
 @layer base {
   html,
   body {
@@ -15,9 +140,8 @@
 
   body {
     overscroll-behavior: none;
-    background-color: theme('colors.surface');
-    /* 暗色为默认模式（DESIGN.md：Dark Mode Default）。 */
-    color-scheme: dark;
+    background-color: rgb(var(--c-surface));
+    /* color-scheme 由主题决定（`src/theme.ts` 与首屏脚本写内联样式），此处不再固定暗色。 */
   }
 
   /* 控制台是内部审计台，滚动条按原型的做法隐藏，避免挤压高密度表格。 */
@@ -26,7 +150,7 @@
     height: 8px;
   }
   ::-webkit-scrollbar-thumb {
-    background-color: theme('colors.surface-container-highest');
+    background-color: rgb(var(--c-surface-container-highest));
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-track {
@@ -44,13 +168,13 @@
     height: 1rem;
     width: 1rem;
     border-radius: 9999px;
-    background-color: theme('colors.primary');
-    border: 2px solid theme('colors.surface-container-high');
+    background-color: rgb(var(--c-primary));
+    border: 2px solid rgb(var(--c-surface-container-high));
     cursor: pointer;
   }
 
   :focus-visible {
-    outline: 2px solid theme('colors.primary');
+    outline: 2px solid rgb(var(--c-primary));
     outline-offset: 1px;
   }
 }
@@ -59,13 +183,13 @@
   /* DESIGN.md：Elevation 1 的材质卡 —— 实底 + 发丝边框。 */
   .material-card {
     @apply rounded-2xl bg-surface-container shadow-md;
-    border: 1px solid theme('colors.hairline');
+    border: 1px solid var(--hairline);
   }
 
   /* 顶栏的「ultra-thin material」：半透明底 + 背景模糊。 */
   .material-bar {
     @apply bg-surface/80 backdrop-blur-xl;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    border-bottom: 1px solid var(--hairline);
   }
 
   /* 等宽内容（时间、路径、密钥、IP、指标）统一走系统等宽字体栈。 */
