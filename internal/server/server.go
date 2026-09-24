@@ -55,7 +55,7 @@ func New(store *config.Store, webFS fs.FS, proxyAddr, adminAddr string, info *ad
 	})
 	proxyMux.Handle("/", proxyHandler)
 
-	adminHandler := admin.New(store, webFS, info)
+	adminHandler := admin.New(store, webFS, info, proxyHandler.Abuse())
 
 	return &Server{
 		info: info,

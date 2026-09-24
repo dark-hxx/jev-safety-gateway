@@ -42,6 +42,24 @@ func (t *Tracker) Banned(ip string, now time.Time) (bool, time.Time) {
 	return true, time.UnixMilli(until)
 }
 
+// Snapshot returns the IPs currently banned as of now, each mapped to the time
+// its ban expires. It is read-only: callers get a fresh copy and entries that
+// have already expired are omitted, but nothing is deleted here — removal stays
+// with Banned/sweepLoop so the ban lifecycle has a single owner. This exists so
+// the admin console can report live bans without reaching into the map.
+func (t *Tracker) Snapshot(now time.Time) map[string]time.Time {
+	nowMS := now.UnixMilli()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make(map[string]time.Time, len(t.banned))
+	for ip, until := range t.banned {
+		if until > nowMS {
+			out[ip] = time.UnixMilli(until)
+		}
+	}
+	return out
+}
+
 // Strike records a harmful hit for ip. If the number of hits within the last
 // windowSec seconds reaches maxHarmful, ip is banned for banSec seconds and the
 // method returns (true, banUntil). Non-positive parameters disable the check.

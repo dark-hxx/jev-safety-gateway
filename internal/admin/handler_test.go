@@ -31,7 +31,7 @@ func newTestHandler(t *testing.T) (*Handler, *config.Store) {
 	if err := store.SetAdminPasswordPlain("secret123"); err != nil {
 		t.Fatalf("set admin password: %v", err)
 	}
-	return New(store, testFS(), nil), store
+	return New(store, testFS(), nil, nil), store
 }
 
 // 登录一次，返回可用的 bearer token。

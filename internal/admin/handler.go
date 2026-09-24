@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,14 @@ type Info struct {
 	AdminAddr string
 }
 
+// BanSnapshot is the read-only view of the live temporary-ban state the IP
+// analytics page needs. *abuse.Tracker satisfies it, so admin can report current
+// bans without importing (or coupling to) the abuse package. A nil BanSnapshot
+// (as in tests, or if wiring is ever omitted) simply yields no bans.
+type BanSnapshot interface {
+	Snapshot(now time.Time) map[string]time.Time
+}
+
 // Handler is the admin HTTP handler (API + static UI).
 type Handler struct {
 	store *config.Store
@@ -38,17 +47,19 @@ type Handler struct {
 	ui    http.Handler
 	mux   *http.ServeMux
 	info  *Info
+	bans  BanSnapshot
 }
 
 // New builds the admin handler. webFS should contain index.html at its root.
 // info may be nil, in which case /api/version reports the running Go version
-// and zero addresses rather than failing.
-func New(store *config.Store, webFS fs.FS, info *Info) *Handler {
+// and zero addresses rather than failing. bans may be nil (no live bans shown).
+func New(store *config.Store, webFS fs.FS, info *Info, bans BanSnapshot) *Handler {
 	h := &Handler{
 		store: store,
 		sess:  newSessions(12 * time.Hour),
 		ui:    spaFileServer(webFS),
 		info:  info,
+		bans:  bans,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/login", h.login)
@@ -61,6 +72,7 @@ func New(store *config.Store, webFS fs.FS, info *Info) *Handler {
 	mux.HandleFunc("/api/logs/models", h.auth(h.logModels))
 	mux.HandleFunc("/api/stats", h.auth(h.stats))
 	mux.HandleFunc("/api/stats/latency", h.auth(h.latency))
+	mux.HandleFunc("/api/stats/ip", h.auth(h.ipStats))
 	mux.HandleFunc("/api/setup-status", h.setupStatus)
 	mux.HandleFunc("/api/setup", h.setup)
 	// Deliberately not wrapped in h.auth: the login screen renders the build
@@ -364,6 +376,77 @@ func (h *Handler) latency(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
+}
+
+// ipStats serves the IP risk analytics page: the per-IP aggregate of the window
+// (most dangerous first), a window-wide summary, and the current live temporary
+// bans read straight from the abuse tracker. Like /api/stats/latency it needs a
+// token — it exposes per-client traffic volume and block history.
+//
+// The live bans come from the in-memory tracker, so they reflect this process
+// only (single-instance by design) and reset on restart. When no tracker was
+// wired (nil bans), the ban list is simply empty rather than an error.
+func (h *Handler) ipStats(w http.ResponseWriter, r *http.Request) {
+	hours := hoursParam(r)
+	now := time.Now()
+	since := now.Add(-time.Duration(hours) * time.Hour)
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	items, summary, err := h.store.IPStats(since, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
+		return
+	}
+	bans := h.bannedList(now)
+
+	writeJSON(w, http.StatusOK, struct {
+		config.IPStatsSummary
+		Hours    int             `json:"hours"`
+		Items    []config.IPStat `json:"items"`
+		Bans     []banEntry      `json:"bans"`
+		BanCount int             `json:"ban_count"`
+	}{
+		IPStatsSummary: summary,
+		Hours:          hours,
+		Items:          items,
+		Bans:           bans,
+		BanCount:       len(bans),
+	})
+}
+
+// banEntry is one live temporary ban as reported to the console.
+type banEntry struct {
+	IP        string `json:"ip"`
+	Until     int64  `json:"until"`      // unix ms the ban expires
+	RemainSec int64  `json:"remain_sec"` // seconds left, floored at 0
+}
+
+// bannedList renders the tracker's live bans, soonest-to-expire last, as of now.
+// It always returns a non-nil slice so the JSON is [] rather than null, and a nil
+// tracker yields an empty list rather than panicking.
+func (h *Handler) bannedList(now time.Time) []banEntry {
+	out := []banEntry{}
+	if h.bans == nil {
+		return out
+	}
+	for ip, until := range h.bans.Snapshot(now) {
+		remain := until.Sub(now)
+		if remain < 0 {
+			remain = 0
+		}
+		out = append(out, banEntry{
+			IP:        ip,
+			Until:     until.UnixMilli(),
+			RemainSec: int64(remain.Seconds()),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Until != out[j].Until {
+			return out[i].Until > out[j].Until
+		}
+		return out[i].IP < out[j].IP
+	})
+	return out
 }
 
 // --- helpers ---

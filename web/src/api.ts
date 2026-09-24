@@ -9,6 +9,7 @@
  */
 import { t } from './i18n'
 import type {
+  IpStatsResponse,
   JEVKey,
   LatencyStats,
   LogEntry,
@@ -176,6 +177,22 @@ export function getLatency(hours: number): Promise<LatencyStats> {
   return request<LatencyStats>(`/api/stats/latency?hours=${encodeURIComponent(String(hours))}`)
 }
 
+/**
+ * `GET /api/stats/ip?hours=&limit=`：按来源 IP 聚合的窗口风险统计。
+ *
+ * 顶层是窗口 KPI 汇总（distinct_ips / crit / high / total_blocked …，覆盖窗口内**全部** IP，
+ * 不受 `limit` 影响），`items` 是危险度倒序的每 IP 列表（被 `limit` 截断，后端上限 500），
+ * `bans` 是 abuse tracker 的实时临时封禁。空窗口时后端可能把 `items` 省略为 null，这里归一化为空数组。
+ * 派生自审计日志，需要 token。
+ */
+export async function getIpStats(hours: number, limit: number): Promise<IpStatsResponse> {
+  const p = new URLSearchParams()
+  p.set('hours', String(hours))
+  p.set('limit', String(limit))
+  const r = await request<IpStatsResponse>('/api/stats/ip?' + p.toString())
+  return { ...r, items: r.items ?? [], bans: r.bans ?? [] }
+}
+
 /** `/api/logs` 的筛选条件，语义与 internal/config.LogFilter 一致（条件之间为「与」）。 */
 export interface LogFilter {
   limit: number
@@ -214,4 +231,4 @@ export function queryLogModels(since: number): Promise<LogModelsResponse> {
   return request<LogModelsResponse>('/api/logs/models?' + p.toString())
 }
 
-export type { JEVKey, LatencyStats, LogEntry, LogModelsResponse, LogsResponse, ModelCount, Settings, StatBucket, Stats, StatsResponse, StateResponse, VersionInfo }
+export type { IpStatsResponse, JEVKey, LatencyStats, LogEntry, LogModelsResponse, LogsResponse, ModelCount, Settings, StatBucket, Stats, StatsResponse, StateResponse, VersionInfo }

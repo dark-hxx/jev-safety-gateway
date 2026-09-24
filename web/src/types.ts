@@ -165,3 +165,66 @@ export interface LatencyStats {
   min: number
   max: number
 }
+
+/**
+ * 与 internal/config/models.go 的 `IPStat` 对应：某来源 IP 在时间窗内的审计聚合，
+ * 附带一个确定式、可解释的危险评分（`danger` / `level`，后端计算、从不落库）。
+ * 时间字段为 unix 毫秒；`avg_score` / `min_score` 在无送检记录时后端省略。
+ */
+export interface IPStat {
+  ip: string
+  total: number
+  allowed: number
+  blocked: number
+  skipped: number
+  errors: number
+  /** 携带 JEV 分值的记录数；为 0 时 avg/min 不出现。 */
+  scored: number
+  avg_score?: number
+  min_score?: number
+  /** 窗口内最早一条记录的时刻，unix 毫秒。 */
+  first_seen: number
+  /** 窗口内最近一条记录的时刻，unix 毫秒。 */
+  last_seen: number
+  last_reason: string
+  /** 0–1 危险评分。 */
+  danger: number
+  /** 危险分档：crit / high / med / low。 */
+  level: string
+}
+
+/**
+ * 与 internal/config/models.go 的 `IPStatsSummary` 对应：窗口内**全部**去重 IP 的 KPI 汇总，
+ * 与返回列表的 limit 无关（截断只影响 `items`，不影响这些总量）。
+ */
+export interface IPStatsSummary {
+  distinct_ips: number
+  blocked_ips: number
+  crit: number
+  high: number
+  total_blocked: number
+  total_events: number
+}
+
+/**
+ * 与 internal/admin 的 banEntry 对应：一条来自 abuse tracker 的实时临时封禁。
+ * 封禁为进程内、单实例、重启即失效。
+ */
+export interface BanEntry {
+  ip: string
+  /** 封禁到期时刻，unix 毫秒。 */
+  until: number
+  /** 剩余封禁秒数，最低为 0（取样于响应生成时刻）。 */
+  remain_sec: number
+}
+
+/**
+ * `GET /api/stats/ip?hours=&limit=` 的响应：窗口 KPI 汇总（`IPStatsSummary` 的字段被平铺在顶层）、
+ * 危险度倒序的每 IP 列表，以及从 abuse tracker 读到的实时封禁。`items` 在空窗口下后端可能省略为 null。
+ */
+export interface IpStatsResponse extends IPStatsSummary {
+  hours: number
+  items: IPStat[] | null
+  bans: BanEntry[]
+  ban_count: number
+}

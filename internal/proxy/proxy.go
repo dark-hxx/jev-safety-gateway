@@ -45,6 +45,11 @@ func New(store *config.Store, client *jev.Client) *Handler {
 	}
 }
 
+// Abuse exposes the proxy's live abuse tracker so the admin console can report
+// the current temporary bans. Read-only use only: the ban lifecycle stays owned
+// by the proxy path (Banned/Strike) and the tracker's own sweeper.
+func (h *Handler) Abuse() *abuse.Tracker { return h.abuse }
+
 const (
 	// maxInspectBody is the largest request body the gateway buffers in order to
 	// inspect it. Larger bodies are streamed through untouched (or rejected,

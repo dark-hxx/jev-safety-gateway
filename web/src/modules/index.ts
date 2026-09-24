@@ -27,6 +27,13 @@ export const SCREEN_MODULES: ScreenModule[] = [
     icon: 'layers',
     component: () => import('./audit/AuditView.vue'),
   },
+  {
+    name: 'ip-analytics',
+    path: '/ip-analytics',
+    title: { zh: 'IP 风险分析与统计', en: 'IP Analytics' },
+    icon: 'network',
+    component: () => import('./ip-analytics/IpAnalyticsView.vue'),
+  },
 ]
 
 /** 默认界面：根路径与未匹配路径都重定向到这里。 */

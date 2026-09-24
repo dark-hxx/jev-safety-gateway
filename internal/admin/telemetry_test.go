@@ -28,7 +28,7 @@ func newVersionHandler(t *testing.T, info *Info) (*Handler, *config.Store) {
 	if err := store.SetAdminPasswordPlain("secret123"); err != nil {
 		t.Fatalf("set admin password: %v", err)
 	}
-	return New(store, testFS(), info), store
+	return New(store, testFS(), info, nil), store
 }
 
 // 版本端点是唯一免鉴权的 /api/ 路由：登录页要在拿到 token 之前显示构建信息与

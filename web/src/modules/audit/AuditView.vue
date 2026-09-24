@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import Icon from '../../components/Icon.vue'
 import NotConnected from '../../components/NotConnected.vue'
 import * as api from '../../api'
@@ -28,6 +29,7 @@ import type { LogEntry, ModelCount } from '../../types'
  */
 const { settings, stats24h } = useConsole()
 const { t } = useI18n()
+const route = useRoute()
 
 /**
  * 送检摘要是否落盘。关闭时后端写入的 `snippet` 恒为空串，界面用占位符说明，
@@ -65,7 +67,9 @@ const DECISIONS: { value: string; labelKey: MessageKey; code: string }[] = [
 const decision = ref('')
 const model = ref('')
 const path = ref('')
-const ip = ref('')
+// 支持从其它页面（如 IP 风险分析）带 ?ip= 深链接进入，预置来源 IP 前缀筛选。
+// 仅初始化 ref，不会触发筛选 watch；onMounted 的首次 load() 会读到该预置值。
+const ip = ref(typeof route.query.ip === 'string' ? route.query.ip : '')
 const q = ref('')
 const sinceIdx = ref(0)
 const offset = ref(0)

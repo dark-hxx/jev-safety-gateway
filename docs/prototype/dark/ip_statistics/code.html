@@ -1,0 +1,889 @@
+<!DOCTYPE html><html class="dark" lang="zh-CN" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<meta content="web_dashboard" name="shell-type">
+<title>JEV IP 分析与统计</title>
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+@layer base {
+  html, body { margin: 0; padding: 0; }
+  body { overscroll-behavior: none; }
+  main > :first-child { margin-top: 0 !important; }
+  main > :last-child { margin-bottom: 0 !important; }
+}
+::-webkit-scrollbar { display: none; }
+</style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      "colors": {
+        "surface": "#121317",
+        "surface-container-lowest": "#0d0e12",
+        "surface-container-low": "#161b22",
+        "surface-container": "#1a1b1f",
+        "surface-container-high": "#222730",
+        "surface-container-highest": "#2e3440",
+        "surface-card": "#161b22",
+        "surface-bright": "#343b48",
+        "on-surface": "#f0f6fc",
+        "on-surface-variant": "#8b949e",
+        "outline": "#414755",
+        "outline-variant": "rgba(255,255,255,0.08)",
+        "primary": "#388bfd",
+        "primary-container": "#1f3964",
+        "on-primary": "#ffffff",
+        "secondary": "#3fb950",
+        "secondary-container": "rgba(63,185,80,0.15)",
+        "error": "#f85149",
+        "error-container": "rgba(248,81,73,0.15)",
+        "system-amber": "#d29922",
+        "system-orange-container": "rgba(210,153,34,0.15)"
+      },
+      "borderRadius": {
+        "DEFAULT": "0.25rem",
+        "lg": "0.5rem",
+        "xl": "0.75rem",
+        "2xl": "1rem",
+        "3xl": "1.25rem",
+        "full": "9999px"
+      },
+      "spacing": {
+        "space-md": "1rem",
+        "space-sm": "0.5rem",
+        "gutter-mobile": "0.75rem",
+        "space-xl": "2.25rem",
+        "space-xs": "0.25rem",
+        "margin-mobile": "1rem",
+        "margin": "2rem",
+        "gutter": "1.25rem",
+        "space-lg": "1.5rem"
+      },
+      "fontFamily": {
+        "title-2": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "body": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "headline": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "caption-1": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "callout": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "code-badge": ["JetBrains Mono", "SF Mono", "Menlo", "monospace"],
+        "caption-2": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "title-3": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "display-mobile": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "footnote": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "code-body": ["JetBrains Mono", "SF Mono", "Menlo", "monospace"],
+        "title-1": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "display": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        "subheadline": ["Plus Jakarta Sans", "-apple-system", "BlinkMacSystemFont", "sans-serif"]
+      },
+      "fontSize": {
+        "title-2": ["22px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+        "body": ["16px", { "lineHeight": "21px", "letterSpacing": "-0.003em", "fontWeight": "400" }],
+        "headline": ["17px", { "lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "600" }],
+        "caption-1": ["12px", { "lineHeight": "16px", "fontWeight": "500" }],
+        "callout": ["15px", { "lineHeight": "20px", "letterSpacing": "-0.002em", "fontWeight": "400" }],
+        "code-badge": ["11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+        "caption-2": ["11px", { "lineHeight": "13px", "fontWeight": "600" }],
+        "title-3": ["20px", { "lineHeight": "25px", "letterSpacing": "-0.008em", "fontWeight": "600" }],
+        "display-mobile": ["28px", { "lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "700" }],
+        "footnote": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
+        "code-body": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
+        "title-1": ["28px", { "lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "700" }],
+        "display": ["32px", { "lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+        "subheadline": ["14px", { "lineHeight": "18px", "fontWeight": "500" }]
+      }
+    }
+  }
+};
+</script>
+</head>
+<body class="bg-[#121317] font-body text-[#f0f6fc] antialiased selection:bg-[#388bfd]/30 selection:text-[#58a6ff]">
+<!-- Sidebar Navigation -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-[#161b22] border-r border-[#2a3140] z-50 flex flex-col justify-between py-space-md">
+<div class="flex flex-col gap-space-md">
+<div class="px-space-md flex items-center gap-space-sm">
+<img alt="JEV Shield Icon" class="h-8 w-8 rounded-lg object-contain shadow-sm border border-[#2a3140]" src="https://lh3.googleusercontent.com/aida/AEtjO1UQm1cb92xGPxpiNQIwI5rsMO0KsOYv3q3GTweNqkN5MRER-riCh3A0imumUeCSUXD2YIOJxxP3VGNEH4cuXNdzf32o8Ce_2XGUdT0zF7vi8BzDhcAgysCkM2AWWeDd5U2_hUS5Dm33-8IB5Z4QC9aTbktZIyzXnQ_z1k4mE5YF6CVFyaAhX4HpnzY2w9_H7xAeJKjdgnAa2fWlxoRZm2l0dG1NdIuyn8SBRiK2yCAbI6cl99i13AexHiI">
+<div class="flex flex-col">
+<span class="text-headline font-headline text-[#f0f6fc] tracking-tight leading-tight">JEV Gateway</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e] leading-tight">AI Safety Control</span>
+</div>
+</div>
+<div class="px-space-md pt-space-xs">
+<span class="text-caption-2 font-caption-2 uppercase tracking-wider text-[#8b949e]">导航 Navigation</span>
+</div>
+<nav class="flex flex-col gap-space-xs px-space-sm">
+<a class="flex items-center px-space-sm py-2 rounded-lg text-subheadline font-subheadline text-[#8b949e] hover:bg-[#222730] hover:text-[#f0f6fc] transition-all" data-path="overview" href="#">
+          运行概览 Dashboard
+        </a>
+<a class="flex items-center px-space-sm py-2 rounded-lg text-subheadline font-subheadline text-[#8b949e] hover:bg-[#222730] hover:text-[#f0f6fc] transition-all" data-path="settings" href="#">
+          网关安全配置 Gateway &amp; Security Settings
+        </a>
+<a class="flex items-center px-space-sm py-2 rounded-lg text-subheadline font-subheadline text-[#8b949e] hover:bg-[#222730] hover:text-[#f0f6fc] transition-all" data-path="logs" href="#">
+          转发审计记录 Forwarding &amp; Audit Stream
+        </a>
+<a class="flex items-center px-space-sm py-2 rounded-lg text-subheadline font-subheadline bg-[#222730] text-[#58a6ff] font-semibold shadow-sm transition-all border border-[#388bfd]/30" data-path="ip-analytics" href="#">
+          IP 分析与统计 IP Analytics &amp; Threat
+        </a>
+</nav>
+</div>
+<div class="px-space-md flex flex-col gap-space-sm">
+<div class="p-space-sm rounded-xl bg-[#1f242c] border border-[#2a3140] shadow-sm flex flex-col gap-space-xs">
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-[#8b949e]">
+<span class="">Engine Core</span>
+<span class="font-code-badge text-code-badge text-[#3fb950] font-medium">v2.4.1-rc</span>
+</div>
+<div class="flex items-center gap-space-xs text-caption-1 font-caption-1 text-[#f0f6fc]">
+<span class="h-1.5 w-1.5 rounded-full bg-[#3fb950]"></span>
+<span class="">TLS 1.3 Strict Mode</span>
+</div>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-[#8b949e] px-space-xs">
+<span class="">Apple HIG Spec</span>
+<span class="">macOS / iPadOS</span>
+</div>
+</div>
+</aside>
+<!-- Main Wrapper -->
+<div class="pl-64">
+<!-- Fixed Cupertino Dark Top Bar -->
+<header class="fixed top-0 left-64 right-0 h-16 z-40 bg-[#161b22]/90 backdrop-blur-xl border-b border-[#2a3140] shadow-[0_1px_3px_rgba(0,0,0,0.3)]">
+<div class="h-16 w-full px-space-md flex items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md min-w-max">
+<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#238636]/15 border border-[#3fb950]/30">
+<span class="h-2 w-2 rounded-full bg-[#3fb950] animate-pulse"></span>
+<span class="text-caption-2 font-caption-2 text-[#3fb950] font-medium">已启用过滤 · Filtering Active</span>
+</div>
+<div class="flex items-center gap-2 pl-space-xs">
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">主网关防护</span>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox">
+<div class="w-11 h-6 bg-[#2a3140] rounded-full peer peer-checked:bg-[#2ea043] peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all shadow-[0_1px_3px_rgba(0,0,0,0.3)]"></div>
+</label>
+</div>
+</div>
+<div class="flex items-center gap-space-md">
+<!-- Cupertino Dark Segmented Theme Switcher -->
+<div class="inline-flex items-center p-0.5 rounded-full bg-[#121317] border border-[#2a3140]">
+<button class="px-2.5 py-1 rounded-full text-caption-2 font-caption-2 text-[#8b949e] hover:text-[#f0f6fc] transition-colors" type="button">跟随系统</button>
+<button class="px-2.5 py-1 rounded-full text-caption-2 font-caption-2 text-[#8b949e] hover:text-[#f0f6fc] transition-colors" type="button">浅色</button>
+<button class="px-2.5 py-1 rounded-full text-caption-2 font-caption-2 bg-[#2a3140] text-[#f0f6fc] font-semibold shadow-sm" type="button">深色</button>
+</div>
+<!-- Lang Switcher -->
+<div class="inline-flex items-center p-0.5 rounded-full bg-[#121317] border border-[#2a3140]">
+<button class="px-2 py-1 rounded-full text-caption-2 font-caption-2 bg-[#2a3140] text-[#f0f6fc] font-semibold shadow-sm" type="button">中</button>
+<button class="px-2 py-1 rounded-full text-caption-2 font-caption-2 text-[#8b949e] hover:text-[#f0f6fc] transition-colors" type="button">EN</button>
+</div>
+<button class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1c2128] hover:bg-[#262c36] text-subheadline font-subheadline text-[#f0f6fc] border border-[#2a3140] transition-all" type="button">
+<span class="material-symbols-outlined text-[16px] text-[#8b949e]">logout</span>
+<span class="">退出</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-[#1f6feb] flex items-center justify-center text-white shadow-sm border border-[#388bfd]/40">
+<span class="material-symbols-outlined text-[18px]">person</span>
+</div>
+</div>
+</div>
+</header>
+<main class="relative w-full pt-16 bg-[#121317] px-margin py-margin min-h-screen">
+<!-- Ambient Glow Accents -->
+<div class="relative w-full">
+<div class="absolute -top-10 -left-16 w-80 h-80 bg-primary/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+<div class="absolute top-32 right-0 w-80 h-80 bg-secondary/5 rounded-full blur-3xl pointer-events-none -z-10"></div>
+</div>
+<div class="flex flex-col w-full gap-space-lg font-body text-[#f0f6fc] antialiased">
+<!-- Top Navigation & Action Header -->
+<header class="flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-center gap-space-xs">
+<span class="text-caption-2 font-caption-2 uppercase tracking-wider text-[#8b949e]">Network Shield Telemetry</span>
+<span class="text-[#484f58]">/</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">AI Boundary Firewalls</span>
+</div>
+<h1 class="text-title-1 font-title-1 tracking-tight text-[#f0f6fc]">
+        IP 风险分析与统计 <span class="text-title-2 font-title-2 font-normal text-[#8b949e]">IP Analytics &amp; Threat Intelligence</span>
+</h1>
+<p class="text-subheadline font-subheadline text-[#8b949e]">
+        多维度透视访问客户端、威胁来源分布、攻击溯源及黑名单动态处置沙箱
+      </p>
+</div>
+<!-- Quick Action Toolbars -->
+<div class="flex items-center flex-wrap gap-space-sm">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#161b22] border border-[#2a3140] shadow-sm">
+<span class="relative flex h-2.5 w-2.5">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#f85149] opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#f85149]"></span>
+</span>
+<span class="text-caption-1 font-caption-1 font-semibold text-[#f0f6fc]">实时威胁监测中</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e] font-code-badge">SYNC 1s</span>
+</div>
+<button class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#161b22] border border-[#2a3140] shadow-sm hover:bg-[#1c2128] transition-all text-subheadline font-subheadline text-[#f0f6fc]" type="button">
+<span class="material-symbols-outlined text-[18px] text-[#8b949e]">ios_share</span>
+<span class="">导出报告</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">CSV</span>
+</button>
+<button class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1f6feb] hover:bg-[#388bfd] text-white shadow-sm transition-all text-subheadline font-subheadline font-medium" onclick="document.getElementById('manual-ban-modal').classList.toggle('hidden')" type="button">
+<span class="material-symbols-outlined text-[18px]">add_moderator</span>
+<span class="">封禁新网段 / IP</span>
+</button>
+</div>
+</header>
+<!-- Metric Overview Cards (Cupertino Dark Widget Style) -->
+<section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-space-md">
+<!-- Card 1 -->
+<div class="relative overflow-hidden p-5 rounded-2xl bg-[#161b22] border border-[#2a3140] shadow-sm flex flex-col justify-between gap-space-sm transition-transform hover:-translate-y-0.5 hover:bg-[#1c2230]">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-[#8b949e]">活跃来源 IP 总数</span>
+<span class="material-symbols-outlined text-[20px] text-[#8b949e]">devices</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="text-display font-display tracking-tight text-[#f0f6fc]">12,480</span>
+<span class="text-caption-2 font-caption-2 text-[#3fb950] font-semibold bg-[#238636]/20 px-2 py-0.5 rounded-full flex items-center border border-[#3fb950]/30">
+<span class="material-symbols-outlined text-[12px]">arrow_upward</span>5.2%
+        </span>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-[#8b949e] pt-2 border-t border-[#2a3140]/60">
+<span class="">全量采样分析率</span>
+<span class="font-code-badge font-medium text-[#f0f6fc]">100% DPI</span>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="relative overflow-hidden p-5 rounded-2xl bg-[#161b22] border border-[#2a3140] shadow-sm flex flex-col justify-between gap-space-sm transition-transform hover:-translate-y-0.5 hover:bg-[#1c2230]">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-[#8b949e]">识别高危 / 攻击 IP</span>
+<span class="material-symbols-outlined text-[20px] text-[#f85149]">shield_with_heart</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="text-display font-display tracking-tight text-[#f85149]">186</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">活跃恶意主体</span>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-[#8b949e] pt-2 border-t border-[#2a3140]/60">
+<span class="">当前封禁锁定中</span>
+<span class="font-code-badge font-semibold text-[#f85149] bg-[#f85149]/15 border border-[#f85149]/30 px-2 py-0.5 rounded-full">142 个 (76.3%)</span>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="relative overflow-hidden p-5 rounded-2xl bg-[#161b22] border border-[#2a3140] shadow-sm flex flex-col justify-between gap-space-sm transition-transform hover:-translate-y-0.5 hover:bg-[#1c2230]">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-[#8b949e]">拦截恶意攻击请求</span>
+<span class="material-symbols-outlined text-[20px] text-[#58a6ff]">gavel</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="text-display font-display tracking-tight text-[#f0f6fc]">48,920</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">次 / 24h</span>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-[#8b949e] pt-2 border-t border-[#2a3140]/60">
+<span class="">前置防护拦截成功率</span>
+<span class="font-code-badge font-semibold text-[#3fb950]">99.98%</span>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="relative overflow-hidden p-5 rounded-2xl bg-[#161b22] border border-[#2a3140] shadow-sm flex flex-col justify-between gap-space-sm transition-transform hover:-translate-y-0.5 hover:bg-[#1c2230]">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-[#8b949e]">异常频次激增预警</span>
+<span class="material-symbols-outlined text-[20px] text-[#d29922]">warning</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="text-display font-display tracking-tight text-[#d29922]">3</span>
+<span class="text-subheadline font-subheadline text-[#8b949e]">个自治系统/网段</span>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-[#8b949e] pt-2 border-t border-[#2a3140]/60">
+<span class="">自适应熔断规则</span>
+<span class="font-code-badge font-medium text-[#d29922] bg-[#d29922]/15 border border-[#d29922]/30 px-2 py-0.5 rounded-full">自动限制 600 QPS</span>
+</div>
+</div>
+</section>
+<!-- Middle 2-Column Core Analytics Panels -->
+<section class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg items-start">
+<!-- Left Column: Top Suspicious & Attacking IPs (7 cols) -->
+<div class="xl:col-span-7 flex flex-col rounded-2xl bg-[#161b22] border border-[#2a3140] shadow-sm overflow-hidden">
+<div class="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm border-b border-[#2a3140]">
+<div>
+<h2 class="text-headline font-headline text-[#f0f6fc] flex items-center gap-2">
+<span class="">高危频次与违规 IP 排行榜</span>
+<span class="text-caption-2 font-caption-2 px-2 py-0.5 rounded-full bg-[#f85149]/20 text-[#f85149] font-semibold border border-[#f85149]/30">TOP 5 攻击源</span>
+</h2>
+<p class="text-footnote font-footnote text-[#8b949e]">基于提示词注入、越狱探针及 CC 泛洪特征提取</p>
+</div>
+<div class="inline-flex items-center p-0.5 rounded-xl bg-[#121317] border border-[#2a3140]">
+<button class="px-3 py-1 rounded-lg text-caption-2 font-caption-2 bg-[#2a3140] text-[#f0f6fc] font-semibold shadow-xs">24小时</button>
+<button class="px-3 py-1 rounded-lg text-caption-2 font-caption-2 text-[#8b949e] hover:text-[#f0f6fc] transition-colors">7天</button>
+<button class="px-3 py-1 rounded-lg text-caption-2 font-caption-2 text-[#8b949e] hover:text-[#f0f6fc] transition-colors">实时溯源</button>
+</div>
+</div>
+<!-- IP Table -->
+<div class="overflow-x-auto w-full">
+<table class="w-full text-left border-collapse whitespace-nowrap">
+<thead>
+<tr class="bg-[#121317]/80 text-caption-2 font-caption-2 uppercase text-[#8b949e] border-b border-[#2a3140]">
+<th class="py-2.5 px-4 font-semibold">&nbsp; &nbsp; &nbsp;源&nbsp; IP 与 归 属地&nbsp;</th>
+<th class="py-2.5 px-4 font-semibold">24h 频次</th>
+<th class="py-2.5 px-4 font-semibold">核心违规判定</th>
+<th class="py-2.5 px-4 font-semibold text-center">危险评分</th>
+<th class="py-2.5 px-4 font-semibold">处置状态</th>
+<th class="py-2.5 px-4 font-semibold text-right">操作</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-[#2a3140]/60 text-subheadline font-subheadline">
+<!-- Row 1 -->
+<tr class="hover:bg-[#1c2230] transition-colors group">
+<td class="py-3.5 px-4">
+<div class="flex flex-col">
+<span class="font-code-body text-[#f0f6fc] font-semibold tracking-tight">194.26.29.112</span>
+<div class="flex items-center gap-1.5 text-caption-2 font-caption-2 text-[#8b949e]">
+<span class="">🇳🇱 荷兰 · 阿姆斯特丹</span>
+<span class="text-[#484f58]">·</span>
+<span class="">AS49981</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4">
+<span class="font-code-body text-[#f0f6fc] font-medium">18,420</span>
+<span class="block text-caption-2 font-caption-2 text-[#f85149]">+310 req/m</span>
+</td>
+<td class="py-3.5 px-4">
+<div class="flex flex-col gap-1">
+<span class="inline-flex items-center gap-1 text-caption-1 font-caption-1 text-[#f85149] font-medium">
+<span class="material-symbols-outlined text-[14px]">bolt</span>Prompt Injection (128次)
+                  </span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">模拟 DAN 攻击绕过越狱</span>
+</div>
+</td>
+<td class="py-3.5 px-4 text-center">
+<span class="inline-block px-2.5 py-1 rounded-full text-caption-2 font-caption-2 font-bold bg-[#f85149] text-white">
+                  98 CRIT
+                </span>
+</td>
+<td class="py-3.5 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f85149]/15 text-[#f85149] text-caption-2 font-caption-2 font-semibold border border-[#f85149]/30">
+<span class="h-1.5 w-1.5 rounded-full bg-[#f85149]"></span>已全局封禁
+                </span>
+</td>
+<td class="py-3.5 px-4 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded-lg text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#222730] transition-colors" title="查看审计 Trace">
+<span class="material-symbols-outlined text-[18px]">travel_explore</span>
+</button>
+<button class="p-1.5 rounded-lg text-[#8b949e] hover:text-[#d29922] hover:bg-[#222730] transition-colors" title="解除限制">
+<span class="material-symbols-outlined text-[18px]">lock_open</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-[#1c2230] transition-colors group">
+<td class="py-3.5 px-4">
+<div class="flex flex-col">
+<span class="font-code-body text-[#f0f6fc] font-semibold tracking-tight">185.191.171.8</span>
+<div class="flex items-center gap-1.5 text-caption-2 font-caption-2 text-[#8b949e]">
+<span class="">🇩🇪 德国 · 法兰克福</span>
+<span class="text-[#484f58]">·</span>
+<span class="">AS60068 Datacenter</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4">
+<span class="font-code-body text-[#f0f6fc] font-medium">9,812</span>
+<span class="block text-caption-2 font-caption-2 text-[#d29922]">+92 req/m</span>
+</td>
+<td class="py-3.5 px-4">
+<div class="flex flex-col gap-1">
+<span class="inline-flex items-center gap-1 text-caption-1 font-caption-1 text-[#d29922] font-medium">
+<span class="material-symbols-outlined text-[14px]">cyclone</span>高频 API Key 爆破探测
+                  </span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">401 失败率 99.4%</span>
+</div>
+</td>
+<td class="py-3.5 px-4 text-center">
+<span class="inline-block px-2.5 py-1 rounded-full text-caption-2 font-caption-2 font-bold bg-[#f85149] text-white">
+                  92 HIGH
+                </span>
+</td>
+<td class="py-3.5 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#d29922]/15 text-[#d29922] text-caption-2 font-caption-2 font-semibold border border-[#d29922]/30">
+<span class="h-1.5 w-1.5 rounded-full bg-[#d29922]"></span>沙箱冷却中
+                </span>
+</td>
+<td class="py-3.5 px-4 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded-lg text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#222730] transition-colors" title="查看审计 Trace">
+<span class="material-symbols-outlined text-[18px]">travel_explore</span>
+</button>
+<button class="p-1.5 rounded-lg text-[#8b949e] hover:text-[#f85149] hover:bg-[#222730] transition-colors" title="立即永久封锁">
+<span class="material-symbols-outlined text-[18px]">block</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-[#1c2230] transition-colors group">
+<td class="py-3.5 px-4">
+<div class="flex flex-col">
+<span class="font-code-body text-[#f0f6fc] font-semibold tracking-tight">114.250.32.91</span>
+<div class="flex items-center gap-1.5 text-caption-2 font-caption-2 text-[#8b949e]">
+<span class="">🇨🇳 中国 · 北京</span>
+<span class="text-[#484f58]">·</span>
+<span class="">AS4808 中国联通</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4">
+<span class="font-code-body text-[#f0f6fc] font-medium">14,204</span>
+<span class="block text-caption-2 font-caption-2 text-[#d29922]">+180 req/m</span>
+</td>
+<td class="py-3.5 px-4">
+<div class="flex flex-col gap-1">
+<span class="inline-flex items-center gap-1 text-caption-1 font-caption-1 text-[#d29922] font-medium">
+<span class="material-symbols-outlined text-[14px]">security_update_warning</span>Token 爬虫与逆向
+                  </span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">触发模型蒸馏反爬指纹</span>
+</div>
+</td>
+<td class="py-3.5 px-4 text-center">
+<span class="inline-block px-2.5 py-1 rounded-full text-caption-2 font-caption-2 font-bold bg-[#d29922] text-[#121317]">
+                  84 HIGH
+                </span>
+</td>
+<td class="py-3.5 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f85149]/15 text-[#f85149] text-caption-2 font-caption-2 font-semibold border border-[#f85149]/30">
+<span class="h-1.5 w-1.5 rounded-full bg-[#f85149]"></span>自动限流拦截
+                </span>
+</td>
+<td class="py-3.5 px-4 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded-lg text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#222730] transition-colors" title="查看审计 Trace">
+<span class="material-symbols-outlined text-[18px]">travel_explore</span>
+</button>
+<button class="p-1.5 rounded-lg text-[#8b949e] hover:text-[#d29922] hover:bg-[#222730] transition-colors" title="解除限制">
+<span class="material-symbols-outlined text-[18px]">lock_open</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-[#1c2230] transition-colors group">
+<td class="py-3.5 px-4">
+<div class="flex flex-col">
+<span class="font-code-body text-[#f0f6fc] font-semibold tracking-tight">45.148.10.22</span>
+<div class="flex items-center gap-1.5 text-caption-2 font-caption-2 text-[#8b949e]">
+<span class="">🇷🇺 俄罗斯 · 莫斯科</span>
+<span class="text-[#484f58]">·</span>
+<span class="">AS44050 Serverius</span>
+</div>
+</div>
+</td>
+<td class="py-3.5 px-4">
+<span class="font-code-body text-[#f0f6fc] font-medium">6,120</span>
+<span class="block text-caption-2 font-caption-2 text-[#8b949e]">静默探测</span>
+</td>
+<td class="py-3.5 px-4">
+<div class="flex flex-col gap-1">
+<span class="inline-flex items-center gap-1 text-caption-1 font-caption-1 text-[#a371f7] font-medium">
+<span class="material-symbols-outlined text-[14px]">psychology</span>System Prompt 泄露诱导
+                  </span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">触发隐式语义过滤探针</span>
+</div>
+</td>
+<td class="py-3.5 px-4 text-center">
+<span class="inline-block px-2.5 py-1 rounded-full text-caption-2 font-caption-2 font-bold bg-[#d29922] text-[#121317]">
+                  76 MED
+                </span>
+</td>
+<td class="py-3.5 px-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#a371f7]/15 text-[#a371f7] text-caption-2 font-caption-2 font-semibold border border-[#a371f7]/30">
+<span class="h-1.5 w-1.5 rounded-full bg-[#a371f7]"></span>蜜罐观察期
+                </span>
+</td>
+<td class="py-3.5 px-4 text-right">
+<div class="flex items-center justify-end gap-1">
+<button class="p-1.5 rounded-lg text-[#8b949e] hover:text-[#58a6ff] hover:bg-[#222730] transition-colors" title="查看审计 Trace">
+<span class="material-symbols-outlined text-[18px]">travel_explore</span>
+</button>
+<button class="p-1.5 rounded-lg text-[#8b949e] hover:text-[#f85149] hover:bg-[#222730] transition-colors" title="立即永久封锁">
+<span class="material-symbols-outlined text-[18px]">block</span>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Footer Info -->
+<div class="p-4 bg-[#121317]/60 border-t border-[#2a3140] flex items-center justify-between text-caption-2 font-caption-2 text-[#8b949e]">
+<span class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[15px] text-[#3fb950]">verified_user</span>
+          启发式异常评分实时更新 · 基于 EWMA 算法衰减
+        </span>
+<a class="text-[#58a6ff] hover:underline font-semibold" href="#">查看完整高危榜单 (186个) →</a>
+</div>
+</div>
+<!-- Right Column: Geographic Heat & Threat Origin (5 cols) -->
+<div class="xl:col-span-5 flex flex-col gap-space-md">
+<!-- Geographic Card -->
+<div class="p-5 rounded-2xl bg-[#161b22] border border-[#2a3140] shadow-sm flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div>
+<h3 class="text-headline font-headline text-[#f0f6fc]">全球与区域威胁来源分布</h3>
+<p class="text-footnote font-footnote text-[#8b949e]">Geographic Origin &amp; Heatmap</p>
+</div>
+<span class="px-2.5 py-1 rounded-full bg-[#222730] border border-[#2a3140] text-caption-2 font-caption-2 text-[#8b949e] font-medium">BGP Route RPKI</span>
+</div>
+<!-- Geo Map Representation Container -->
+
+<!-- Distribution Progress Meters -->
+<div class="relative w-full h-44 rounded-xl bg-[#0d0e12] border border-[#2a3140] overflow-hidden flex flex-col justify-between p-2.5 shadow-inner group"><div class="absolute inset-0 pointer-events-none opacity-20" style="background-image: radial-gradient(#388bfd 1px, transparent 1px); background-size: 14px 14px;"></div><svg class="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none" viewBox="0 0 460 176"><defs><linearGradient id="lineGradRed" x1="0%" x2="100%" y1="0%" y2="100%"><stop offset="0%" stop-color="#f85149" stop-opacity="0.9"></stop><stop offset="100%" stop-color="#f85149" stop-opacity="0.15"></stop></linearGradient><linearGradient id="lineGradAmber" x1="0%" x2="100%" y1="0%" y2="100%"><stop offset="0%" stop-color="#f85149" stop-opacity="0.8"></stop><stop offset="100%" stop-color="#d29922" stop-opacity="0.2"></stop></linearGradient><linearGradient id="lineGradBlue" x1="0%" x2="100%" y1="0%" y2="100%"><stop offset="0%" stop-color="#388bfd" stop-opacity="0.7"></stop><stop offset="100%" stop-color="#58a6ff" stop-opacity="0.1"></stop></linearGradient><radialGradient cx="52%" cy="42%" id="threatGlow" r="35%"><stop offset="0%" stop-color="#f85149" stop-opacity="0.25"></stop><stop offset="100%" stop-color="#f85149" stop-opacity="0"></stop></radialGradient></defs><rect fill="url(#threatGlow)" height="176" width="460" x="0" y="0"></rect><ellipse cx="230" cy="88" fill="none" opacity="0.15" rx="190" ry="70" stroke="#8b949e" stroke-dasharray="2 4" stroke-width="0.8"></ellipse><ellipse cx="230" cy="88" fill="none" opacity="0.12" rx="110" ry="40" stroke="#8b949e" stroke-dasharray="2 3" stroke-width="0.8"></ellipse><line opacity="0.12" stroke="#8b949e" stroke-dasharray="3 3" stroke-width="0.8" x1="230" x2="230" y1="0" y2="176"></line><line opacity="0.12" stroke="#8b949e" stroke-dasharray="3 3" stroke-width="0.8" x1="0" x2="460" y1="88" y2="88"></line><g fill="#8b949e" opacity="0.28"><circle cx="75" cy="42" r="1.8"></circle><circle cx="90" cy="38" r="1.8"></circle><circle cx="105" cy="44" r="1.8"></circle><circle cx="80" cy="56" r="1.8"></circle><circle cx="96" cy="58" r="1.8"></circle><circle cx="112" cy="52" r="1.8"></circle><circle cx="126" cy="62" r="1.8"></circle><circle cx="90" cy="74" r="1.8"></circle><circle cx="105" cy="70" r="1.8"></circle><circle cx="125" cy="102" r="1.8"></circle><circle cx="135" cy="118" r="1.8"></circle><circle cx="142" cy="136" r="1.8"></circle><circle cx="220" cy="42" r="1.8"></circle><circle cx="235" cy="46" r="1.8"></circle><circle cx="250" cy="44" r="1.8"></circle><circle cx="218" cy="56" r="1.8"></circle><circle cx="232" cy="58" r="1.8"></circle><circle cx="246" cy="60" r="1.8"></circle><circle cx="260" cy="54" r="1.8"></circle><circle cx="228" cy="78" r="1.8"></circle><circle cx="240" cy="92" r="1.8"></circle><circle cx="248" cy="114" r="1.8"></circle><circle cx="252" cy="132" r="1.8"></circle><circle cx="280" cy="40" r="1.8"></circle><circle cx="300" cy="42" r="1.8"></circle><circle cx="325" cy="44" r="1.8"></circle><circle cx="350" cy="46" r="1.8"></circle><circle cx="375" cy="50" r="1.8"></circle><circle cx="292" cy="58" r="1.8"></circle><circle cx="315" cy="62" r="1.8"></circle><circle cx="340" cy="65" r="1.8"></circle><circle cx="365" cy="64" r="1.8"></circle><circle cx="388" cy="68" r="1.8"></circle><circle cx="320" cy="84" r="1.8"></circle><circle cx="335" cy="96" r="1.8"></circle><circle cx="352" cy="88" r="1.8"></circle><circle cx="378" cy="124" r="1.8"></circle><circle cx="395" cy="135" r="1.8"></circle></g><path d="M234 52 Q 170 30 108 58" fill="none" stroke="url(#lineGradAmber)" stroke-dasharray="4 3" stroke-width="1.4"></path><path d="M234 52 Q 290 34 362 62" fill="none" stroke="url(#lineGradRed)" stroke-dasharray="5 3" stroke-width="1.5"></path><path d="M234 52 Q 260 40 286 46" fill="none" stroke="url(#lineGradRed)" stroke-dasharray="3 2" stroke-width="1.2"></path><path d="M234 52 Q 240 95 248 128" fill="none" stroke="url(#lineGradBlue)" stroke-dasharray="3 3" stroke-width="1"></path><circle cx="234" cy="52" fill="#f85149" opacity="0.4" r="8"><animate attributeName="r" dur="2s" repeatCount="indefinite" values="4;14;4"></animate><animate attributeName="opacity" dur="2s" repeatCount="indefinite" values="0.6;0;0.6"></animate></circle><circle cx="234" cy="52" fill="#f85149" r="3.5"></circle><circle cx="286" cy="46" fill="#a371f7" opacity="0.4" r="6"></circle><circle cx="286" cy="46" fill="#a371f7" r="2.5"></circle><circle cx="362" cy="62" fill="#d29922" opacity="0.4" r="7"><animate attributeName="r" dur="2.5s" repeatCount="indefinite" values="3;10;3"></animate><animate attributeName="opacity" dur="2.5s" repeatCount="indefinite" values="0.5;0;0.5"></animate></circle><circle cx="362" cy="62" fill="#d29922" r="3"></circle><circle cx="108" cy="58" fill="#388bfd" opacity="0.4" r="6"></circle><circle cx="108" cy="58" fill="#388bfd" r="2.5"></circle></svg><div class="relative z-10 flex items-center justify-between gap-2"><div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#161b22]/90 border border-[#f85149]/30 text-caption-2 font-caption-2 backdrop-blur-md"><span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#f85149] opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-[#f85149]"></span></span><span class="text-[#f0f6fc] font-semibold whitespace-nowrap">拓扑热点:</span><span class="text-[#8b949e] whitespace-nowrap">EU Hub ⇄ APAC / NA 穿透</span></div><div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#161b22]/90 border border-[#2a3140] text-caption-2 font-caption-2 backdrop-blur-md"><span class="h-1.5 w-1.5 rounded-full bg-[#3fb950] animate-pulse"></span><span class="font-code-badge text-[#3fb950] whitespace-nowrap">LIVE RADAR 1s</span></div></div><div class="relative z-10 flex items-center justify-between text-caption-2 font-caption-2 bg-[#161b22]/95 backdrop-blur-md px-3 py-1.5 rounded-lg border border-[#2a3140]/80 shadow-sm"><div class="flex items-center gap-1.5 overflow-hidden"><span class="h-1.5 w-1.5 rounded-full bg-[#f85149] animate-pulse shrink-0"></span><span class="text-[#f0f6fc] font-medium whitespace-nowrap">高危越狱节点重点区域:</span><span class="text-[#8b949e] truncate whitespace-nowrap">欧洲主干网 / Frankfurt / Amsterdam Hub</span></div><span class="font-code-badge text-[#f85149] font-semibold whitespace-nowrap shrink-0 ml-2">18,785 hits</span></div></div><div class="flex flex-col gap-3.5 pt-0">
+<!-- Europe -->
+<div class="flex flex-col gap-1">
+<div class="flex justify-between text-caption-1 font-caption-1">
+<span class="font-medium text-[#f0f6fc]">欧洲地区 (Europe Datacenters)</span>
+<span class="font-code-badge font-semibold text-[#f0f6fc]">38.4% <span class="text-[#8b949e] font-normal">(18,785次)</span></span>
+</div>
+<div class="w-full h-2 rounded-full bg-[#1f242c] overflow-hidden">
+<div class="h-full bg-[#f85149] rounded-full" style="width: 38.4%"></div>
+</div>
+</div>
+<!-- APAC -->
+<div class="flex flex-col gap-1">
+<div class="flex justify-between text-caption-1 font-caption-1">
+<span class="font-medium text-[#f0f6fc]">亚太地区 (Asia Pacific)</span>
+<span class="font-code-badge font-semibold text-[#f0f6fc]">32.1% <span class="text-[#8b949e] font-normal">(15,703次)</span></span>
+</div>
+<div class="w-full h-2 rounded-full bg-[#1f242c] overflow-hidden">
+<div class="h-full bg-[#d29922] rounded-full" style="width: 32.1%"></div>
+</div>
+</div>
+<!-- North America -->
+<div class="flex flex-col gap-1">
+<div class="flex justify-between text-caption-1 font-caption-1">
+<span class="font-medium text-[#f0f6fc]">北美地区 (North America)</span>
+<span class="font-code-badge font-semibold text-[#f0f6fc]">24.5% <span class="text-[#8b949e] font-normal">(11,985次)</span></span>
+</div>
+<div class="w-full h-2 rounded-full bg-[#1f242c] overflow-hidden">
+<div class="h-full bg-[#388bfd] rounded-full" style="width: 24.5%"></div>
+</div>
+</div>
+<!-- Others -->
+<div class="flex flex-col gap-1">
+<div class="flex justify-between text-caption-1 font-caption-1">
+<span class="font-medium text-[#f0f6fc]">其他中转自治系统 (Tor / Unknown)</span>
+<span class="font-code-badge font-semibold text-[#f0f6fc]">5.0% <span class="text-[#8b949e] font-normal">(2,447次)</span></span>
+</div>
+<div class="w-full h-2 rounded-full bg-[#1f242c] overflow-hidden">
+<div class="h-full bg-[#8b949e] rounded-full" style="width: 5%"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Attack Types Breakdown Card -->
+<div class="p-5 rounded-2xl bg-[#161b22] border border-[#2a3140] shadow-sm flex flex-col gap-3">
+<div class="flex items-center justify-between">
+<span class="text-headline font-headline text-[#f0f6fc]">攻击特征与 ASN 映射</span>
+<span class="material-symbols-outlined text-[18px] text-[#8b949e]">hub</span>
+</div>
+<div class="grid grid-cols-2 gap-2.5">
+<div class="p-3 rounded-xl bg-[#1f242c] border border-[#2a3140] flex flex-col gap-1">
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">撞库与 Flood 集中网段</span>
+<span class="font-code-body text-caption-1 text-[#f0f6fc] font-bold">185.191.0.0/16</span>
+<span class="text-caption-2 font-caption-2 text-[#f85149] font-medium">触发 1,420 次请求/秒</span>
+</div>
+<div class="p-3 rounded-xl bg-[#1f242c] border border-[#2a3140] flex flex-col gap-1">
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">越狱注入集中 ASN</span>
+<span class="font-code-body text-caption-1 text-[#f0f6fc] font-bold">AS49981 (HostEurope)</span>
+<span class="text-caption-2 font-caption-2 text-[#f85149] font-medium">占越狱总流量 41.8%</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Bottom Full-Width Card: Dynamic Ban Sandbox & Banned IP Pool -->
+<section class="flex flex-col rounded-2xl bg-[#161b22] border border-[#2a3140] shadow-sm overflow-hidden mb-space-md">
+<!-- Header with Cupertino Segmented Control and Filter Controls -->
+<div class="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-space-md border-b border-[#2a3140]">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-2">
+<h2 class="text-title-3 font-title-3 text-[#f0f6fc]">动态封禁沙箱与黑名单规则池</h2>
+<span class="px-2 py-0.5 rounded-full bg-[#238636]/20 border border-[#3fb950]/30 text-[#3fb950] text-caption-2 font-caption-2 font-semibold">WAF 联动生效</span>
+</div>
+<p class="text-footnote font-footnote text-[#8b949e]">
+          Abuse Sandbox &amp; Blacklist Policy Engine · 自动化与人工封禁规则集
+        </p>
+</div>
+<!-- Segmented Status Tabs -->
+<div class="inline-flex items-center p-1 rounded-xl bg-[#121317] border border-[#2a3140]">
+<button class="px-4 py-1.5 rounded-lg text-subheadline font-subheadline bg-[#222730] text-[#f0f6fc] font-semibold shadow-xs flex items-center gap-1.5">
+<span class="">当前已封禁</span>
+<span class="text-caption-2 font-caption-2 px-1.5 py-0.5 rounded-full bg-[#f85149]/20 text-[#f85149] font-bold border border-[#f85149]/30">142</span>
+</button>
+<button class="px-4 py-1.5 rounded-lg text-subheadline font-subheadline text-[#8b949e] hover:text-[#f0f6fc] transition-colors flex items-center gap-1.5">
+<span class="">临时隔离沙箱</span>
+<span class="text-caption-2 font-caption-2 px-1.5 py-0.5 rounded-full bg-[#d29922]/20 text-[#d29922] font-bold border border-[#d29922]/30">28</span>
+</button>
+<button class="px-4 py-1.5 rounded-lg text-subheadline font-subheadline text-[#8b949e] hover:text-[#f0f6fc] transition-colors flex items-center gap-1.5">
+<span class="">白名单穿透</span>
+<span class="text-caption-2 font-caption-2 px-1.5 py-0.5 rounded-full bg-[#238636]/20 text-[#3fb950] font-bold border border-[#3fb950]/30">15</span>
+</button>
+</div>
+</div>
+<!-- Search & Secondary Filter Toolbar -->
+<div class="px-5 py-3 bg-[#121317]/80 flex flex-col md:flex-row items-center justify-between gap-3 border-b border-[#2a3140]">
+<div class="relative w-full md:w-96">
+<span class="material-symbols-outlined absolute left-3 top-2 text-[18px] text-[#8b949e]">search</span>
+<input class="w-full pl-9 pr-4 py-1.5 rounded-xl bg-[#1c2128] border border-[#2a3140] text-[#f0f6fc] text-subheadline font-subheadline placeholder:text-[#8b949e] focus:ring-2 focus:ring-[#388bfd]/30 focus:border-[#388bfd] outline-none transition-all" placeholder="搜索 IP、CIDR 掩码段、ASN 或封禁备注..." type="text">
+</div>
+<div class="flex items-center gap-2 w-full md:w-auto justify-end overflow-x-auto">
+<!-- Filter Dropdown 1 -->
+<select class="text-caption-1 font-caption-1 bg-[#1c2128] text-[#f0f6fc] px-3 py-1.5 rounded-xl border border-[#2a3140] shadow-xs outline-none focus:border-[#388bfd]">
+<option>全部封禁原因 (All Triggers)</option>
+<option>越狱探测攻击</option>
+<option>高频爬虫与逆向</option>
+<option>API Key 暴力破解</option>
+<option>合规审查违规 (Sensitive)</option>
+</select>
+<!-- Filter Dropdown 2 -->
+<select class="text-caption-1 font-caption-1 bg-[#1c2128] text-[#f0f6fc] px-3 py-1.5 rounded-xl border border-[#2a3140] shadow-xs outline-none focus:border-[#388bfd]">
+<option>全部剩余时长</option>
+<option>24小时内解封</option>
+<option>7天以内</option>
+<option>永久封锁 (Permanent)</option>
+</select>
+<button class="p-1.5 rounded-xl bg-[#1c2128] border border-[#2a3140] text-[#8b949e] hover:text-[#f0f6fc] shadow-xs transition-colors" title="刷新规则状态">
+<span class="material-symbols-outlined text-[18px]">refresh</span>
+</button>
+</div>
+</div>
+<!-- Detailed Pool Table -->
+<div class="overflow-x-auto w-full">
+<table class="w-full text-left border-collapse whitespace-nowrap">
+<thead>
+<tr class="text-caption-2 font-caption-2 uppercase text-[#8b949e] border-b border-[#2a3140] bg-[#121317]/40">
+<th class="py-3 px-5 font-semibold">封禁对象 (IP / CIDR)</th>
+<th class="py-3 px-5 font-semibold">触发熔断原因</th>
+<th class="py-3 px-5 font-semibold">触发阈值条件</th>
+<th class="py-3 px-5 font-semibold">生效时间戳</th>
+<th class="py-3 px-5 font-semibold">剩余解封倒计时</th>
+<th class="py-3 px-5 font-semibold text-right">沙箱运维</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-[#2a3140]/60 text-subheadline font-subheadline">
+<!-- Item 1 -->
+<tr class="hover:bg-[#1c2230] transition-colors">
+<td class="py-4 px-5">
+<div class="flex items-center gap-2">
+<span class="h-2 w-2 rounded-full bg-[#f85149]"></span>
+<span class="font-code-body font-bold text-[#f0f6fc]">194.26.29.112</span>
+<span class="text-caption-2 font-caption-2 px-1.5 py-0.5 rounded bg-[#222730] text-[#8b949e] font-code-badge border border-[#2a3140]">Host</span>
+</div>
+</td>
+<td class="py-4 px-5">
+<div class="flex flex-col">
+<span class="font-medium text-[#f0f6fc]">连续触发越狱攻击阈值</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">AST 注入模式匹配度 &gt; 94%</span>
+</div>
+</td>
+<td class="py-4 px-5 font-code-badge text-caption-2 text-[#8b949e]">
+              5次 / 10s (已超标 25.6x)
+            </td>
+<td class="py-4 px-5 text-caption-1 font-caption-1 text-[#8b949e]">
+              2025-05-18 14:22:04
+            </td>
+<td class="py-4 px-5">
+<span class="font-code-body text-caption-1 font-bold text-[#f85149]">永久封禁 (MANUAL)</span>
+</td>
+<td class="py-4 px-5 text-right">
+<div class="inline-flex items-center gap-2">
+<button class="text-caption-1 font-caption-1 font-medium text-[#58a6ff] hover:underline">调阅 Trace</button>
+<span class="text-[#484f58]">|</span>
+<button class="text-caption-1 font-caption-1 font-medium text-[#f85149] hover:underline">立即解封</button>
+</div>
+</td>
+</tr>
+<!-- Item 2 -->
+<tr class="hover:bg-[#1c2230] transition-colors">
+<td class="py-4 px-5">
+<div class="flex items-center gap-2">
+<span class="h-2 w-2 rounded-full bg-[#d29922]"></span>
+<span class="font-code-body font-bold text-[#f0f6fc]">185.191.171.0/24</span>
+<span class="text-caption-2 font-caption-2 px-1.5 py-0.5 rounded bg-[#222730] text-[#8b949e] font-code-badge border border-[#2a3140]">Subnet</span>
+</div>
+</td>
+<td class="py-4 px-5">
+<div class="flex flex-col">
+<span class="font-medium text-[#f0f6fc]">网段协同暴力测试 API 密钥</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">跨 14 个节点轮询试错 Token</span>
+</div>
+</td>
+<td class="py-4 px-5 font-code-badge text-caption-2 text-[#8b949e]">
+              401 报错 &gt; 500 次/分
+            </td>
+<td class="py-4 px-5 text-caption-1 font-caption-1 text-[#8b949e]">
+              2025-05-18 15:05:12
+            </td>
+<td class="py-4 px-5">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px] text-[#d29922] animate-spin">timelapse</span>
+<span class="font-code-body text-caption-1 font-semibold text-[#f0f6fc]">00:42:15</span>
+</div>
+</td>
+<td class="py-4 px-5 text-right">
+<div class="inline-flex items-center gap-2">
+<button class="text-caption-1 font-caption-1 font-medium text-[#d29922] hover:underline">延长24h</button>
+<span class="text-[#484f58]">|</span>
+<button class="text-caption-1 font-caption-1 font-medium text-[#8b949e] hover:text-[#f0f6fc]">加入白名单</button>
+</div>
+</td>
+</tr>
+<!-- Item 3 -->
+<tr class="hover:bg-[#1c2230] transition-colors">
+<td class="py-4 px-5">
+<div class="flex items-center gap-2">
+<span class="h-2 w-2 rounded-full bg-[#d29922]"></span>
+<span class="font-code-body font-bold text-[#f0f6fc]">103.214.112.44</span>
+<span class="text-caption-2 font-caption-2 px-1.5 py-0.5 rounded bg-[#222730] text-[#8b949e] font-code-badge border border-[#2a3140]">Host</span>
+</div>
+</td>
+<td class="py-4 px-5">
+<div class="flex flex-col">
+<span class="font-medium text-[#f0f6fc]">无头浏览器与高频恶意爬虫</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">JA3/JA4 TLS 指纹命中已知自动化集群</span>
+</div>
+</td>
+<td class="py-4 px-5 font-code-badge text-caption-2 text-[#8b949e]">
+              速率上限 300 QPS 溢出
+            </td>
+<td class="py-4 px-5 text-caption-1 font-caption-1 text-[#8b949e]">
+              2025-05-18 15:18:50
+            </td>
+<td class="py-4 px-5">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[14px] text-[#d29922] animate-spin">timelapse</span>
+<span class="font-code-body text-caption-1 font-semibold text-[#f0f6fc]">02:18:04</span>
+</div>
+</td>
+<td class="py-4 px-5 text-right">
+<div class="inline-flex items-center gap-2">
+<button class="text-caption-1 font-caption-1 font-medium text-[#58a6ff] hover:underline">调阅 Trace</button>
+<span class="text-[#484f58]">|</span>
+<button class="text-caption-1 font-caption-1 font-medium text-[#f85149] hover:underline">转永久黑名单</button>
+</div>
+</td>
+</tr>
+<!-- Item 4 -->
+<tr class="hover:bg-[#1c2230] transition-colors">
+<td class="py-4 px-5">
+<div class="flex items-center gap-2">
+<span class="h-2 w-2 rounded-full bg-[#f85149]"></span>
+<span class="font-code-body font-bold text-[#f0f6fc]">91.240.118.0/23</span>
+<span class="text-caption-2 font-caption-2 px-1.5 py-0.5 rounded bg-[#222730] text-[#8b949e] font-code-badge border border-[#2a3140]">Subnet</span>
+</div>
+</td>
+<td class="py-4 px-5">
+<div class="flex flex-col">
+<span class="font-medium text-[#f0f6fc]">威胁情报中心已知恶意僵尸网络 C2</span>
+<span class="text-caption-2 font-caption-2 text-[#8b949e]">Spamhaus DROP 列表自动导入</span>
+</div>
+</td>
+<td class="py-4 px-5 font-code-badge text-caption-2 text-[#8b949e]">
+              全局信誉评分 &lt; 10
+            </td>
+<td class="py-4 px-5 text-caption-1 font-caption-1 text-[#8b949e]">
+              2025-05-17 09:00:00
+            </td>
+<td class="py-4 px-5">
+<span class="font-code-body text-caption-1 font-bold text-[#f85149]">永久封禁 (TI SYNC)</span>
+</td>
+<td class="py-4 px-5 text-right">
+<div class="inline-flex items-center gap-2">
+<button class="text-caption-1 font-caption-1 font-medium text-[#8b949e] hover:text-[#f0f6fc]">更新特征</button>
+<span class="text-[#484f58]">|</span>
+<button class="text-caption-1 font-caption-1 font-medium text-[#f85149] hover:underline">解除规则</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Table Pagination & Bulk Operations -->
+<div class="p-4 bg-[#121317]/60 border-t border-[#2a3140] flex flex-col sm:flex-row items-center justify-between gap-3 text-subheadline font-subheadline">
+<div class="flex items-center gap-2 text-caption-1 font-caption-1 text-[#8b949e]">
+<span class="">显示 1 至 4 条，共 142 个被封锁实体</span>
+<span class="text-[#484f58]">·</span>
+<button class="text-[#58a6ff] hover:underline font-medium">批量导出规则配置</button>
+</div>
+<div class="flex items-center gap-1">
+<button class="px-2.5 py-1 rounded-lg bg-[#1c2128] border border-[#2a3140] shadow-xs text-caption-1 font-caption-1 text-[#8b949e] hover:text-[#f0f6fc] disabled:opacity-40" disabled="">上一页</button>
+<button class="px-2.5 py-1 rounded-lg bg-[#1f6feb] text-white text-caption-1 font-caption-1 font-semibold">1</button>
+<button class="px-2.5 py-1 rounded-lg bg-[#1c2128] border border-[#2a3140] shadow-xs text-caption-1 font-caption-1 text-[#f0f6fc] hover:bg-[#222730]">2</button>
+<button class="px-2.5 py-1 rounded-lg bg-[#1c2128] border border-[#2a3140] shadow-xs text-caption-1 font-caption-1 text-[#f0f6fc] hover:bg-[#222730]">3</button>
+<span class="px-1 text-[#8b949e]">...</span>
+<button class="px-2.5 py-1 rounded-lg bg-[#1c2128] border border-[#2a3140] shadow-xs text-caption-1 font-caption-1 text-[#f0f6fc] hover:bg-[#222730]">36</button>
+<button class="px-2.5 py-1 rounded-lg bg-[#1c2128] border border-[#2a3140] shadow-xs text-caption-1 font-caption-1 text-[#f0f6fc] hover:bg-[#222730]">下一页</button>
+</div>
+</div>
+</section>
+<!-- Cupertino Sheet Modal: Manual Ban / Add Subnet (Hidden by default) -->
+<div class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4" id="manual-ban-modal">
+<div class="bg-[#161b22] rounded-2xl shadow-2xl max-w-lg w-full p-6 flex flex-col gap-space-md border border-[#2a3140]">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[24px] text-[#f85149]">block</span>
+<h3 class="text-headline font-headline text-[#f0f6fc]">添加手动封禁 IP / 网段</h3>
+</div>
+<button class="p-1 rounded-full text-[#8b949e] hover:text-[#f0f6fc] hover:bg-[#222730]" onclick="document.getElementById('manual-ban-modal').classList.add('hidden')">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<div class="flex flex-col gap-3">
+<div class="flex flex-col gap-1">
+<label class="text-caption-1 font-caption-1 text-[#8b949e]">目标 IP 地址或 CIDR 掩码段</label>
+<input class="px-3.5 py-2 rounded-xl bg-[#1c2128] border border-[#2a3140] text-[#f0f6fc] text-subheadline font-subheadline font-code-body outline-none focus:border-[#388bfd] focus:ring-2 focus:ring-[#388bfd]/30" placeholder="例如: 194.26.29.0/24 或 1.2.3.4" type="text">
+</div>
+<div class="flex flex-col gap-1">
+<label class="text-caption-1 font-caption-1 text-[#8b949e]">封禁原因类型</label>
+<select class="px-3.5 py-2 rounded-xl bg-[#1c2128] border border-[#2a3140] text-[#f0f6fc] text-subheadline font-subheadline outline-none focus:border-[#388bfd]">
+<option>频繁越狱提示词注入攻击 (DAN/Jailbreak)</option>
+<option>高频恶性爬虫 / 反向工程抓取</option>
+<option>API Key 伪造与泛洪探测</option>
+<option>合规审查风险阻断 (Sensitive Filter)</option>
+<option>人工安全排查临时隔离</option>
+</select>
+</div>
+<div class="flex flex-col gap-1">
+<label class="text-caption-1 font-caption-1 text-[#8b949e]">封禁有效时长</label>
+<div class="grid grid-cols-3 gap-2">
+<label class="flex items-center justify-center p-2 rounded-xl bg-[#1c2128] border border-[#2a3140] cursor-pointer hover:bg-[#222730] transition-colors">
+<input checked="" class="sr-only" name="duration" type="radio">
+<span class="text-caption-1 font-caption-1 font-semibold text-[#f0f6fc]">1 小时 (临时)</span>
+</label>
+<label class="flex items-center justify-center p-2 rounded-xl bg-[#1c2128] border border-[#2a3140] cursor-pointer hover:bg-[#222730] transition-colors">
+<input class="sr-only" name="duration" type="radio">
+<span class="text-caption-1 font-caption-1 font-semibold text-[#f0f6fc]">24 小时</span>
+</label>
+<label class="flex items-center justify-center p-2 rounded-xl bg-[#1c2128] border border-[#2a3140] cursor-pointer hover:bg-[#222730] transition-colors">
+<input class="sr-only" name="duration" type="radio">
+<span class="text-caption-1 font-caption-1 font-semibold text-[#f85149]">永久封禁</span>
+</label>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<label class="text-caption-1 font-caption-1 text-[#8b949e]">处置审计备注</label>
+<textarea class="px-3.5 py-2 rounded-xl bg-[#1c2128] border border-[#2a3140] text-[#f0f6fc] text-subheadline font-subheadline outline-none focus:border-[#388bfd] focus:ring-2 focus:ring-[#388bfd]/30" placeholder="填写安全工单编号或处置依据..." rows="2"></textarea>
+</div>
+</div>
+<div class="flex items-center justify-end gap-2 pt-2 border-t border-[#2a3140]">
+<button class="px-4 py-2 rounded-xl text-subheadline font-subheadline text-[#8b949e] hover:bg-[#222730] hover:text-[#f0f6fc] transition-colors" onclick="document.getElementById('manual-ban-modal').classList.add('hidden')" type="button">
+          取消
+        </button>
+<button class="px-5 py-2 rounded-xl bg-[#da3633] hover:bg-[#f85149] text-white text-subheadline font-subheadline font-semibold transition-all shadow-sm" onclick="document.getElementById('manual-ban-modal').classList.add('hidden')" type="button">
+          确认立即下发规则
+        </button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+
+
+</body></html>

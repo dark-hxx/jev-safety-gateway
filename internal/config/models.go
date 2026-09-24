@@ -215,3 +215,44 @@ type LatencyStats struct {
 	Min     int64   `json:"min"`
 	Max     int64   `json:"max"`
 }
+
+// IPStat is the per-IP aggregate of the audit log over a window: raw decision
+// counts plus a derived, explainable danger rating. It powers the IP risk
+// analytics page. Raw counts and the score inputs are all carried so the console
+// can show how a rating was reached rather than an opaque number.
+type IPStat struct {
+	IP      string `json:"ip"`
+	Total   int64  `json:"total"`
+	Allowed int64  `json:"allowed"`
+	Blocked int64  `json:"blocked"`
+	Skipped int64  `json:"skipped"`
+	Errors  int64  `json:"errors"`
+
+	// Scored is the number of rows that carry a JEV score (allow/block/error that
+	// actually reached scoring). AvgScore/MinScore are nil when Scored is 0, so
+	// the console renders "—" instead of a fabricated 0.
+	Scored   int64    `json:"scored"`
+	AvgScore *float64 `json:"avg_score,omitempty"`
+	MinScore *float64 `json:"min_score,omitempty"`
+
+	FirstSeen  int64  `json:"first_seen"` // unix ms of the earliest row in the window
+	LastSeen   int64  `json:"last_seen"`  // unix ms of the most recent row
+	LastReason string `json:"last_reason"`
+
+	// Danger is a deterministic 0–1 rating (see ipDanger); Level buckets it into
+	// crit/high/med/low. Both are computed, never stored.
+	Danger float64 `json:"danger"`
+	Level  string  `json:"level"`
+}
+
+// IPStatsSummary is the KPI header for the IP analytics page: totals across all
+// distinct IPs in the window, independent of the per-IP limit applied to the
+// returned list.
+type IPStatsSummary struct {
+	DistinctIPs  int64 `json:"distinct_ips"`
+	BlockedIPs   int64 `json:"blocked_ips"` // IPs with at least one block
+	Crit         int64 `json:"crit"`
+	High         int64 `json:"high"`
+	TotalBlocked int64 `json:"total_blocked"`
+	TotalEvents  int64 `json:"total_events"`
+}
