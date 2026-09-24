@@ -1,28 +1,96 @@
-# JEV 安全网关 (JEV Safety Gateway)
+# JEV 安全网关 · JEV Safety Gateway
+
+> **语言 / Language**：简体中文 ｜ [English](README.en-US.md)
+
+<div align="center">
+
+**🛡️ 面向大模型 API 流量的内容安全过滤网关**
+
+[![Release](https://img.shields.io/github/v/release/dark-hxx/jev-safety-gateway?logo=github&label=release&color=4c6ef5)](https://github.com/dark-hxx/jev-safety-gateway/releases/latest)
+[![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Vue 3](https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-no%20CGO-003B57?logo=sqlite&logoColor=white)](https://pkg.go.dev/modernc.org/sqlite)
+[![Deploy](https://img.shields.io/badge/deploy-Docker%20Linux%20Windows-4c6ef5)](docs/deployment.md)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue)](LICENSE)
+
+位于 nginx 与大模型后端之间的前置过滤反向代理：逐请求提取用户输入交给 JEV 判定，**有害拦截、正常透明放行**
+
+[核心特性](#-核心特性) • [界面展示](#-界面展示) • [快速开始](#-快速开始docker) • [快速安装](#-快速安装) • [配置项说明](#-配置项说明) • [本地开发](#-本地开发) • [开源协议](#-开源协议)
+
+</div>
+
+---
 
 基于 [TypeSafe / JEV 模型](https://docs.typesafe.ai/api) 的**前置 API 请求过滤网关**。它位于 nginx 与你的大模型后端（如 [new-api](https://doc.newapi.pro/api/) 或任何 OpenAI 兼容服务）之间：读取每个请求，按 API 路径取出用户输入，交给 JEV 判定是否有风险（色情、暴力、破解、诱导等），**有害请求直接拦截、正常请求透明放行**。
 
-```
-客户端  ──►  nginx  ──►  JEV 网关  ──►  上游 (new-api / OpenAI 兼容后端)
-                            │  取出输入 ──► JEV 模型判定
-                            └─(有害)─► 403 拦截
+```mermaid
+flowchart LR
+    A["客户端"] --> B["nginx"] --> C["JEV 网关"]
+    C -->|"取出用户输入"| D{"JEV 模型判定"}
+    D -->|"正常"| E["上游 new-api / OpenAI 兼容后端"]
+    D -->|"有害"| F["403 拦截"]
 ```
 
-## 特性
+---
 
-- **透明反向代理**：判定通过后原样转发到上游，客户端无感知，支持流式 (SSE) 响应。
-- **多路径字段解析**：自动识别并从不同接口取出用户输入
+## ✨ 核心特性
+
+- ✅ **透明反向代理** — 判定通过后原样转发到上游，客户端无感知，完整支持流式（SSE）响应
+- ✅ **多协议格式 · 多语种** — 兼容 OpenAI、Anthropic、Gemini 三种主流 API 协议格式；送检与语种无关，中文 / 英文 / 日语 / 韩语 / 西班牙语 / 维吾尔语等多语种内容统一交由 JEV 模型判定
+- ✅ **多路径字段解析** — 自动识别并从不同接口取出用户输入
   - `/v1/chat/completions`（OpenAI，`messages[].content`，兼容多模态 text 分片）
   - `/v1/completions`（`prompt`）、`/v1/embeddings` / `/v1/moderations`（`input`）
-  - `/v1/messages`（Anthropic，`system` + `messages`）、`/v1/rerank`（`query`）
+  - `/v1/messages`（Anthropic，`messages`）、`/v1/rerank`（`query`）
   - `/v1/images/*`（`prompt`）、Gemini `:generateContent`（`contents[].parts[].text`）
   - 未知路径回退到通用文本收集，尽量不漏检
-- **多 JEV 密钥轮询**：配置多个 TypeSafe apikey，轮流调用并在 401/429/529 时自动切换下一个密钥。
-- **可配置拦截策略**：安全阈值、判定指令、拦截提示语；JEV 故障时可选 **fail-open（放行）** 或 fail-closed（拦截）。
-- **内置管理控制台**：Vue 3 单页应用，含运行概览（转送量、判定构成、逐桶流量趋势、风险分值分布）、网关与安全策略配置、转发审计记录（可按判定状态、目标模型、来源 IP、请求路径、关键词、时间范围筛选，服务端分页）三个界面；构建产物随仓库提交，运行期无公网依赖。
-- **SQLite 持久化 + 管理员口令登录**，Docker 一键部署。
+- ✅ **对抗绕过防护（送检前净化）** — 剥离客户端注入的 `<system-reminder>` 等上下文，并就地解码 base64 段后再送检，避免安全信号被稀释或被编码绕过（base64 解码送检默认开启，可在控制台关闭）
+- ✅ **多 JEV 密钥轮询** — 配置多个 TypeSafe apikey 轮流调用，遇 401/429/529 自动切换下一个密钥
+- ✅ **可配置拦截策略** — 安全阈值、判定指令、拦截提示语；JEV 故障时可选 **fail-open（放行）** 或 fail-closed（拦截）
+- ✅ **滥用防护** — 按来源 IP 滑动窗口统计，频繁攻击临时封禁，封禁期直接拒绝不再消耗 token
+- ✅ **送检内容记录可开关** — `record_snippet` 默认关闭，审计日志只留判定结果 / 分值 / 原因，不落用户送检文本；需要排查时在控制台打开
+- ✅ **内置管理控制台** — Vue 3 单页应用，含运行概览（转送量、判定构成、逐桶流量趋势、风险分值分布）、网关与安全策略配置、转发审计记录（可按判定状态、目标模型、来源 IP、请求路径、关键词、时间范围筛选，服务端分页）三个界面；构建产物随仓库提交，运行期无公网依赖
+- ✅ **SQLite 持久化 + 管理员口令登录**，Docker 一键部署
 
-## 快速开始（Docker）
+---
+
+## 🖥️ 界面展示
+
+内置管理控制台：Vue 3 单页应用，构建产物随仓库提交、离线内嵌，开箱即用；支持深色 / 浅色 / 跟随系统主题与中英文切换。下图为深色主题。
+
+<div align="center">
+
+**运行概览 · 安全监控驾驶舱** — 转送量、判定构成、逐桶流量趋势与风险分值分布
+
+<img src="docs/screenshots/dashboard-dark.png" alt="运行概览" width="880">
+
+**网关安全配置** — 上游路由、检定阈值、判定指令、自动拉黑策略与密钥池
+
+<img src="docs/screenshots/settings-dark.png" alt="网关安全配置" width="880">
+
+**转发审计记录** — 逐条判定结果，可按状态 / 模型 / IP / 路径 / 关键词 / 时间筛选
+
+<img src="docs/screenshots/audit-dark.png" alt="转发审计记录" width="880">
+
+**IP 风险分析与统计** — 按来源 IP 聚合危险评分、实时封禁与黑白名单管理
+
+<img src="docs/screenshots/ip-analytics-dark.png" alt="IP 风险分析与统计" width="880">
+
+</div>
+
+<details>
+<summary>浅色主题预览</summary>
+
+<div align="center">
+
+<img src="docs/screenshots/dashboard-light.png" alt="运行概览（浅色主题）" width="880">
+
+</div>
+
+</details>
+
+---
+
+## 🚀 快速开始（Docker）
 
 ```bash
 cp .env.example .env      # 按需填写上游地址 / 初始密钥 / 管理员口令（都可留空，后续在控制台配置）
@@ -40,111 +108,89 @@ docker compose up -d --build
 
 之后把客户端流量指向网关（或经由 nginx，见 `nginx/gateway.conf`）即可。
 
-## 部署指南
+---
 
-三个生产部署目标，选一个即可。分平台的完整安装、升级、备份与排错见 **[docs/deployment.md](docs/deployment.md)**；本节给出选型与最小上手步骤。
+## 📦 快速安装
 
-| 目标 | 适用场景 | 部署产物 |
-|---|---|---|
-| **Docker / compose** | 有容器运行时，或要与 new-api 同机编排 | `Dockerfile`、`docker-compose.yml` |
-| **Linux 裸机** | 发行版带 systemd，不想引入容器 | `deploy/linux/install.sh`（幂等，可重复执行） |
-| **Windows 服务** | Windows Server，需要开机自启与进程托管 | `scripts/install-service.ps1` |
+预编译包与镜像都在 [GitHub Releases](https://github.com/dark-hxx/jev-safety-gateway/releases)  
 
-### 先看两条硬约束（三个目标都一样）
+装完后浏览器打开 `http://127.0.0.1:8081`，设管理员口令 → 填上游地址 → 加至少一个 JEV 密钥即可对外服务。
 
-1. **同一份数据库只能跑一个实例。** 滥用计数在进程内存里（`internal/abuse`），配置存储串行化在单条 SQLite 连接上（`internal/config`）。起两个进程会同时丢失封禁状态并争抢数据库文件锁——没有多副本模式，也不能两个实例在线滚动升级。
-2. **升级前必须整体备份 SQLite 三件套**（`.db` / `.db-wal` / `.db-shm`）。`-wal` 可能远大于主库（实测主库 40 KB / WAL 3.4 MB），数据主要落在 WAL 里，**单独留下主库没有意义**。
+### Docker
 
-> 表结构迁移目前只有 `CREATE TABLE IF NOT EXISTS`：给**既有表新增列**的变更不会自动生效（启动后报 `no such column`），升级前请先读 [docs/deployment.md](docs/deployment.md) 的迁移一节。设置项本身不受影响——`load()` 在默认值之上解码存储的 JSON，新版本加的设置项在旧库上自动取默认值。
-
-### Docker / compose
+**方式一：`docker run`（拉预构建镜像，最快）**
 
 ```bash
-cp .env.example .env      # 按需填上游地址 / 初始密钥 / 管理员口令，都可留空
-docker compose up -d --build
+docker run -d --name jev-safety-gateway --restart unless-stopped \
+  -p 8080:8080 -p 127.0.0.1:8081:8081 \
+  -v jev-safety-gateway-data:/data \
+  ghcr.io/dark-hxx/jev-safety-gateway:latest
 ```
 
-- **监听**：代理 `8080:8080`（nginx 转发到这里）；控制台容器内绑 `:8081`，宿主机映射 `127.0.0.1:8081:8081`——**是端口映射而非绑定地址**保住了它的私密性，所以镜像里必须是 `:8081`（`Dockerfile` 的 `ENV` 已设）。
-- **数据**：命名卷 `jev-safety-gateway-data` 挂到 `/data`。卷名在 compose 里写死，不含项目名前缀，因此下面的备份命令在任何目录名下都一样。
-- **日志**：容器日志已设 `max-size: 10m` / `max-file: 3` 上限（`json-file` 默认无限增长，长期运行必须设）。容器内**不要**再设 `JEV_LOG_FILE`，`docker logs` 就够。
-- **版本号**：`docker compose up -d --build` 会自动从 `web/package.json` 解析出真实版本（不会显示 `dev`）。`.git` 不在构建上下文里，提交号与构建时间拿不到，要显式传：
+**方式二：`docker compose`（便于与 new-api 等一起编排）**
 
-  ```bash
-  JEV_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
-  ```
+新建 `docker-compose.yml`，同样直接用预构建镜像、无需源码：
 
-- **升级**：先备份卷，再 `docker compose up -d --build`。
-- **备份**：
-
-  ```bash
-  docker run --rm -v jev-safety-gateway-data:/data -v "$PWD":/backup \
-    alpine tar czf /backup/jev-safety-gateway-$(date +%F).tar.gz -C /data .
-  ```
-
-> 若 new-api 也在同一个 compose 里，用服务名互联（上游地址填 `http://newapi:3000`），无需暴露 3000 端口。nginx 若也容器化，见 `docker-compose.yml` 里的注释块——`nginx/gateway.conf` 的 upstream 要改成服务名 `jev-safety-gateway:8080`。
-
-### Linux 裸机（systemd）
-
-发布包内 `install.sh`、`jev-safety-gateway`、`jev-safety-gateway.service`、`env.example`、`deployment.md` 放在同一目录，直接跑：
+```yaml
+services:
+  jev-safety-gateway:
+    image: ghcr.io/dark-hxx/jev-safety-gateway:latest
+    container_name: jev-safety-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - jev-safety-gateway-data:/data
+    logging:                       # 容器日志默认无限增长，务必设上限
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+volumes:
+  jev-safety-gateway-data:
+    name: jev-safety-gateway-data
+```
 
 ```bash
+docker compose up -d
+```
+
+> 仓库根目录自带的 `docker-compose.yml` 走的是**从源码构建**（`build:` + `--build`，供开发用）；上面这份直接用预构建镜像，适合只想跑起来的部署。
+
+### Linux（装成 systemd 服务）
+
+一条命令搞定：自动识别架构、拉取最新 Release、装成开机自启服务（再跑一次即升级）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dark-hxx/jev-safety-gateway/master/deploy/linux/install-remote.sh | sudo bash
+```
+
+<details>
+<summary>不想 curl | bash？手动下载再装</summary>
+
+```bash
+# ARM64 把 amd64 换成 arm64；VER 换成 Releases 页最新版本号
+VER=2.0.0
+curl -fL -o jev.tar.gz \
+  https://github.com/dark-hxx/jev-safety-gateway/releases/download/v${VER}/jev-safety-gateway-${VER}-linux-amd64.tar.gz
+tar xzf jev.tar.gz && cd jev-safety-gateway-${VER}-linux-amd64
 sudo ./install.sh
 ```
 
-- **幂等**：重复执行就是升级——停服务、换二进制、再起。它**从不删除也不覆盖**数据库与 `/etc/jev-safety-gateway/env`（升级不会重置上游地址与密钥）。
-- **路径**：
+</details>
 
-  | 内容 | 位置 |
-  |---|---|
-  | 二进制 | `/usr/local/bin/jev-safety-gateway` |
-  | systemd unit | `/etc/systemd/system/jev-safety-gateway.service` |
-  | 初始化配置（含密钥） | `/etc/jev-safety-gateway/env`（`0600`） |
-  | 数据库三件套 | `/var/lib/jev-safety-gateway/` |
+### Windows（装成原生服务）
 
-- **服务用户**：专用系统账号 `jev-safety-gateway`（`nologin`），unit 内已加 `ProtectSystem=strict` 等加固；数据库目录由 `StateDirectory=` 交给 systemd 管理，权限自动正确。
-- **日志**：走 journald，**不要设 `JEV_LOG_FILE`**（那是给 Windows 服务的）。
-- **常用命令**：
-
-  ```bash
-  systemctl status jev-safety-gateway
-  journalctl -u jev-safety-gateway -f
-  systemctl restart jev-safety-gateway
-  ```
-
-- **升级**：把新二进制覆盖到同目录后重跑 `sudo ./install.sh`。
-- **备份**：
-
-  ```bash
-  sudo tar czf ~/jev-safety-gateway-$(date +%F).tar.gz \
-    /var/lib/jev-safety-gateway /etc/jev-safety-gateway
-  ```
-
-- **卸载**：`sudo ./install.sh --uninstall`。库与配置**有意保留**，脚本末尾会打印它们的路径与手工清理命令。
-
-### Windows 服务（原生）
-
-无需 nssm：`cmd/jev-safety-gateway/entry_windows.go` 用 `golang.org/x/sys/windows/svc` 检测 SCM，并把 Stop/Shutdown 映射到 `server.Run` 已经在等的那个 context，所以 `sc.exe stop` 与 Ctrl+C 走**同一条关闭路径**，在途请求会被排空。
-
-以**管理员**身份：
+下载 `jev-safety-gateway-<版本>-windows-amd64.zip` 解压，在**管理员 PowerShell** 里：
 
 ```powershell
-.\scripts\install-service.ps1 -ExePath .\out\jev-safety-gateway\jev-safety-gateway.exe
+.\install-service.ps1 -ExePath .\jev-safety-gateway.exe
 ```
 
-- **安装目录**：默认 `%ProgramData%\jev-safety-gateway`，二进制、`data\`、`logs\` 都在这里（和仓库里的 `data\` 是两回事，脚本从不删除数据目录）。
-- **环境变量**：Windows 服务没有 shell，变量写在服务注册表 `Environment`（`REG_MULTI_SZ`）。脚本**只放基础设施变量**（`JEV_DB_PATH` / `JEV_LOG_FILE` / `JEV_PROXY_ADDR` / `JEV_ADMIN_ADDR`）。
-  **密钥与管理员口令请留在控制台里配置**——注册表对管理员与 SYSTEM 可读，`-EnvFile` 会把初始密钥写进去，生产环境不推荐。
-- **日志**：`JEV_LOG_FILE` 已自动指向 `logs\gateway.log`，**必须设**——SCM 不给服务控制台，stderr 会被丢弃，不设等于没有日志。
-- **崩溃自启**：已配置 `sc.exe failure` 动作 `restart/5000` ×3、计数每天重置。
-- **升级**：停服务 → 替换 exe → 起服务（重跑 `install-service.ps1` 亦可，它会停服务再换文件）。
-- **卸载**：`.\scripts\uninstall-service.ps1`，保留 `data\` 与 `logs\`。加 `-Purge` 才会删，且需手工输入 `DELETE` 确认，并会先自动备份。
+> 升级、备份、单实例约束、反向代理与排障见 **[docs/deployment.md](docs/deployment.md)**（也随每个发布包分发）。控制台默认只绑本机，远程走 SSH 隧道，**不要改绑 `0.0.0.0`**。
 
-### 反向代理与远程访问
+---
 
-- **nginx**：`nginx/gateway.conf` 是现成示例，upstream 默认 `127.0.0.1:8080`（裸机口径），容器部署改成服务名。它已透传 `X-Forwarded-For` / `X-Real-IP`——**滥用防护按来源 IP 计数，少透传这一项会让所有客户端共用一个计数**。
-- **控制台远程访问**：默认只绑本机。远程请走 SSH 隧道 `ssh -L 8081:127.0.0.1:8081 <user>@<host>`，或在 nginx 层叠加 IP 白名单 / TLS / basic auth。**不要改绑 `0.0.0.0`**。
-
-## 配置项说明
+## ⚙️ 配置项说明
 
 | 配置 | 说明 | 默认 |
 |---|---|---|
@@ -158,7 +204,7 @@ sudo ./install.sh
 | `fail_open` | JEV 不可用时是否放行 | `true` |
 | `check_response` | 是否同时审核上游响应内容（开启后响应不再流式） | `false` |
 | `reject_oversize_body` | 请求体超过 8 MiB 而无法送检时是否直接拒绝（关闭则原样转发） | `false` |
-| `max_state_chars` | 送检文本最大字符数（控制 JEV token 成本） | `16000` |
+| `max_state_chars` | 送检文本最大字符数（控制 JEV token 成本与延迟，见下文） | `16000` |
 | `jev_timeout_ms` | 单次 JEV 调用超时 | `8000` |
 | `record_snippet` | 是否持久化用户送检摘要（关闭时日志不含任何送检文本） | `false` |
 | `dedup_enabled` | 相同送检内容在窗口内复用上次检定结果 | `true` |
@@ -175,39 +221,26 @@ sudo ./install.sh
 { "error": { "message": "...", "type": "jev_safety_block", "code": "content_blocked" } }
 ```
 
-### 端点覆盖与请求体转发
+### 行为要点
 
-网关对**所有** OpenAI 格式端点做同一套处理：能从请求里取出用户文本就送检，取不出就原样转发；转发**不改变字节**，因此流式（SSE）、分块请求、大文件上传都不受影响。
+- **只送检最新一轮用户输入** — 不带系统提示词与历史，避免有害内容被稀释
+- **送检前自动净化** — 剥离 `<system-reminder>` 注入上下文、解码长 base64 段防绕过（可在控制台关）
+- **取不出文本就原样转发** — 不改字节，SSE / 分块 / 大文件（> 8 MiB）都不受影响
+- **`max_state_chars` 默认 16000** — 建议 ≤ 40000，调大时同步调大 `jev_timeout_ms`
+- **`record_snippet` 默认关** — 关闭时审计只留判定结果，不落用户送检文本
+- **相同内容去重** — 窗口内复用上次分值、不重复调 JEV（`dedup_enabled`，默认开）
+- **滥用防护** — 同一 IP 有害次数达阈值即临时封禁，返回 429 且不再调 JEV 省 token
 
-- 覆盖的端点：`/chat/completions`、`/completions`、`/responses`、`/embeddings`、`/moderations`、`/images/*`、`/audio/speech`、`/videos*`、`/realtime/sessions`、`/assistants`、`/threads/*`、`/rerank`、Anthropic `/messages`、Gemini `:generateContent`；`multipart/form-data`（转写、图片编辑等）按表单字段取文本，跳过文件部分。
-- 明知不含用户文本的端点（`/files`、`/uploads`、`/batches`、`/fine_tuning/*`、`/vector_stores*`、`/models`）记为 `skip`，不会被误判为“未知端点”。
-- 未识别的路径回退为“收集请求体里所有字符串”（跳过 `data:` 内嵌数据），因此新端点也不会漏检。
-- 送检的**只是最新一轮用户输入**，不带客户端注入的系统提示词和整段历史：否则有害内容会被大量无害文本稀释而判为安全。OpenAI 的 `tool` 角色、Anthropic 的 `tool_result`、Responses 的 `function_call_output` 都算最新一轮（Agent 循环里最新提交的常常就是工具输出）。
-- 客户端塞进最新一轮的**注入上下文会被剥掉**：Claude Code 一类客户端把 CLAUDE.md、memory 索引、git status 等作为 `<system-reminder>` 块塞在用户消息里，本项目首轮实测约 24 KB，超过 `max_state_chars` 后截断取的是前缀，用户真正输入会被整段挤出送检文本（JEV 只看到客户端上下文，实测每个新会话首轮都被误拦）。这些块与已被忽略的 `system` 字段同级，因此送检前整块删除；若删除后没有剩下任何文本，记为 `skip` 且原因写明「仅含客户端注入上下文」，**原样转发而不是拦截**。代价是藏在这类标签里的内容不再送检——与忽略 `system` 字段是同一个取舍，不引入更大的规避面。
-- 送检文本里的**长 base64 段会被就地解码**：客户端可能把载荷编码后交给模型（Claude Code 的会话标题请求会把会话内容放进 `<session>BASE64</session>`），同一句话明文送检是 0.15（拦截）、base64 送检是 0.80（放行），等于一条免费绕过通道。解码后两种编码得到**逐字节相同**的送检文本，因此分值与去重缓存键也一致。只有长度 ≥32 且是 4 的倍数的段、且解码结果是「合法 UTF-8 + 至少 90% 可打印 + 含字母」才会替换，哈希、ID、图片/音频 base64、未补 padding 的变体一律原样保留；解码只会让文本变短，不会挤占 `max_state_chars`。该行为由控制台「上游服务与 JEV 检定路由」里的 **base64 内容解码送检**开关控制，**默认开启**；关闭后文本按客户端原样送检（编码内容将作为乱码参与判定）。它只作用于请求方向的送检，不影响响应审计。
-- 请求体超过 8 MiB 时无法送检：默认**原样转发**（记为 `skip` / `oversize`，大文件上传照常可用）；勾选 `reject_oversize_body` 后改为失败关闭，返回 **413**：
+<details>
+<summary>📋 覆盖的端点清单</summary>
 
-```json
-{ "error": { "message": "...", "type": "jev_oversize_body", "code": "request_too_large" } }
-```
+`/chat/completions`、`/completions`、`/responses`、`/embeddings`、`/moderations`、`/images/*`、`/audio/speech`、`/videos*`、`/realtime/sessions`、`/assistants`、`/threads/*`、`/rerank`、Anthropic `/messages`、Gemini `:generateContent`；`multipart/form-data` 取文本字段、跳过文件。无用户文本的端点（`/files`、`/uploads`、`/batches` 等）记为 `skip`，未识别路径回退为收集全部字符串，均不漏检。
 
-### 送检摘要记录与检定结果复用
+</details>
 
-`record_snippet` 默认**关闭**：审计日志只保留判定结果、分值与原因，不写入用户送检文本，`JEV_DEBUG` 调试日志同样不打印该文本；控制台的「转发审计记录」以「未记录」占位展示。该开关只影响开关关闭后写入的新记录，不追溯修改已有记录。
+---
 
-`dedup_enabled` 默认**开启**：同一段送检文本（连同 JEV 地址、模型、判定指令、阈值与拦截方向一起参与比对）在 `dedup_window_sec` 秒内重复出现时，直接复用上一次的分值，不再调用 JEV；审计记录的「原因」列会追加「；命中相同内容缓存」。缓存只保存文本的 sha256 摘要与分值，不保存送检文本本身；命中拦截时照常累计滥用计数，封禁语义不变。缓存位于进程内存中，重启即清空。
-
-### 滥用防护（按 IP 限流）
-
-除单条内容拦截外，网关还按来源 IP 做**滑动窗口攻击检测**：当同一 IP 在 `abuse_window_sec` 秒内被判定有害的次数达到 `abuse_max_harmful`，该 IP 会被封禁 `abuse_ban_sec` 秒。封禁期间它的所有请求**直接拒绝（HTTP 429，带 `Retry-After`），不再调用 JEV**（节省 token），响应头含 `X-JEV-Gateway: banned`：
-
-```json
-{ "error": { "message": "...", "type": "jev_abuse_block", "code": "ip_temporarily_banned" } }
-```
-
-> 计数状态在内存中，进程重启后清零；来源 IP 取自 `X-Forwarded-For` / `X-Real-IP`（经 nginx 时需按 `nginx/gateway.conf` 透传真实 IP）。
-
-## 环境变量（首次启动一次性初始化，已存在值不覆盖）
+## 🌱 环境变量（首次启动一次性初始化，已存在值不覆盖）
 
 | 变量 | 说明 |
 |---|---|
@@ -220,7 +253,9 @@ sudo ./install.sh
 | `JEV_API_KEY` | 初始 JEV 密钥（之后可在控制台增删多个） |
 | `JEV_ADMIN_PASSWORD` | 初始管理员口令 |
 
-## 请求示例
+---
+
+## 📡 请求示例
 
 ```bash
 # 正常请求 → 放行并透传到上游
@@ -231,18 +266,52 @@ curl http://localhost:8080/v1/chat/completions \
 # 有风险请求 → 403 拦截（响应头含 X-JEV-Gateway: blocked, X-JEV-Score）
 ```
 
-## 本地启动测试（不用 Docker）
+---
 
-需要 Go 1.23+。依赖为纯 Go 实现（`modernc.org/sqlite`），无需 CGO / gcc。
+## 🧪 本地开发
 
-### 1. 编译
+需要 Go 1.23+；纯 Go 依赖（`modernc.org/sqlite`），无需 CGO / gcc。前端产物 `web/dist` 已入库并经 `//go:embed` 内嵌，`go build` / `go test` **不需要 Node**——只有改了 `web/src` 才要重建 `web/dist`。
 
-```powershell
-go mod tidy                        # 首次：拉取依赖并生成 go.sum（需联网）
-go build -o .\jev-safety-gateway.exe .\cmd\jev-safety-gateway
+### 构建与测试
+
+```bash
+go mod tidy                       # 首次 / 依赖变更后（生成 go.sum，需联网）
+go build -o jev-safety-gateway ./cmd/jev-safety-gateway   # Windows 产出 .exe
+go vet ./...
+go test ./...
+
+# 前端：仅当 web/src 改动时
+npm --prefix web install          # 首次
+npm --prefix web run build        # 重建 web/dist，再编译 Go 二进制
+npm --prefix web run typecheck
 ```
 
-版本号、提交号与构建时间通过链接期注入（控制台登录页与壳层底部展示，见 `GET /api/version`）：
+### 运行
+
+```powershell
+.\jev-safety-gateway.exe          # 数据库默认落在 .\data\jev-safety-gateway.db（自动创建）
+```
+
+启动成功会打印 `proxy listening on :8080` 与 `admin listening on 127.0.0.1:8081`。浏览器打开 `http://localhost:8081` → 设管理员口令（≥6 位）→ 填上游地址 → 加至少一个 JEV 密钥即可对外服务。
+
+### 打包成测试包（Windows）
+
+`scripts\` 下两个脚本，产物是测试包目录 `out\jev-safety-gateway\` 加一个 zip，可整包拷到测试机跑：
+
+```powershell
+.\scripts\start-local-test.ps1                       # 构建 + 打包 + 启动（日常用）
+.\scripts\start-local-test.ps1 -SkipFrontend -NoZip  # 只构建后端再启动（改 Go 代码最快）
+.\scripts\build-local-test.ps1                       # 只打包，不启动
+```
+
+常用参数：`-SkipBuild`（直接重启已有包）、`-SkipFrontend`（沿用已提交前端）、`-Clean`（清空测试包目录）、`-DbPath`（换库位置）、`-ProxyAddr` / `-AdminAddr`（换监听地址）。完整参数见脚本头部注释。
+
+> ⚠️ **绝不要删除仓库 `data\` 下的文件**（`jev-safety-gateway.db` 及其 `-wal` / `-shm`）：不受版本控制、`rm` 不进回收站、无卷影副本，删掉即永久丢失；`-wal` 常远大于主库，三件套必须整体保护。构建脚本的 `-Clean` 只清测试包，碰不到仓库根的 `data\`。
+
+<details>
+<summary>版本号注入 · 冒烟测试 · 常见问题</summary>
+
+**版本号注入**（可选；不注入则版本显示 `dev`，提交号 / 构建时间回落到 Go 内嵌的 VCS 信息）：
 
 ```powershell
 $ver = (Get-Content .\web\package.json -Raw -Encoding UTF8 | ConvertFrom-Json).version
@@ -252,154 +321,31 @@ go build -trimpath -ldflags "-s -w -X main.version=$ver -X main.commit=$sha -X m
   -o .\jev-safety-gateway.exe .\cmd\jev-safety-gateway
 ```
 
-三个 `-X` 都是可选的：不注入时版本显示 `dev`，提交号与构建时间回落到 Go 内嵌的 VCS 信息
-（`debug.ReadBuildInfo()`），因此直接 `go build` 也能报出真实提交。`scripts\build-local-test.ps1`
-已自动完成上述注入。Docker 构建上下文不含 `.git`（见 `.dockerignore`），镜像内的构建标识**只能**靠
-`--build-arg VERSION/COMMIT/BUILD_TIME` 传入。
+`scripts\build-local-test.ps1` 已自动完成注入；Docker 构建上下文不含 `.git`，镜像内标识靠 `--build-arg` 传入。
 
-### 2. 启动
-
-```powershell
-# 数据库默认落在当前工作目录下的 .\data\jev-safety-gateway.db，目录会自动创建，无需额外配置
-.\jev-safety-gateway.exe
-
-# 想换位置再显式指定：
-# $env:JEV_DB_PATH = "D:\somewhere\jev-safety-gateway.db"
-```
-
-看到下面两行即启动成功：
-
-```
-proxy listening on :8080
-admin listening on 127.0.0.1:8081
-```
-
-### 3. 打开控制台配置
-
-浏览器访问 `http://localhost:8081`：
-
-1. 首次会要求**设置管理员口令**（≥6 位）
-2. 登录后在「网关配置」填 **上游地址** 并保存
-3. 「JEV 调用密钥」里**至少添加一个 apikey**
-
-### 4. 分阶段冒烟测试
-
-**阶段一 · 先验证代理透传**（控制台把「启用过滤」关掉，上游临时填 `https://httpbin.org`）：
+**冒烟测试**（先在控制台关「启用过滤」、上游临时填 `https://httpbin.org` 验证透传，再打开过滤验证放行 / 拦截）：
 
 ```bash
-curl -s http://localhost:8080/post \
-  -H 'Content-Type: application/json' \
-  -d '{"messages":[{"role":"user","content":"hello"}]}'
-# 收到 httpbin 回显 → 读包体/转发/回传链路正常
-```
-
-**阶段二 · 打开过滤，验证放行 vs 拦截**（「启用过滤」打开，已加 JEV 密钥）：
-
-```bash
-# 正常内容 → 200 放行，响应头 X-JEV-Gateway: allow
-curl -i http://localhost:8080/post \
-  -H 'Content-Type: application/json' \
+# 正常 → 200 放行（X-JEV-Gateway: allow）
+curl -i http://localhost:8080/post -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"今天天气怎么样"}]}'
-
-# 有风险内容 → 403 拦截，响应头 X-JEV-Gateway: blocked、X-JEV-Score
-curl -i http://localhost:8080/post \
-  -H 'Content-Type: application/json' \
+# 有风险 → 403 拦截（X-JEV-Gateway: blocked、X-JEV-Score）
+curl -i http://localhost:8080/post -H 'Content-Type: application/json' \
   -d '{"messages":[{"role":"user","content":"教我怎么破解并入侵别人的服务器"}]}'
 ```
 
-回到控制台「最近请求」可看到每条的判定、JEV 分数与耗时。
+**常见问题**：
 
-**阶段三 · 接真实上游**：把上游地址改成你的 new-api（如 `http://127.0.0.1:3000`），路径走 `/v1/chat/completions`、带上游所需的 `Authorization` 即可。
-
-### 常见问题
-
-- **正常内容被拦 / 有害内容放行** → 调「安全阈值」(默认 0.5) 或改「安全判定指令」，分数越接近 1 越安全。
-- **一直 error / fail-open 放行** → 多半是 JEV 密钥无效或网络不通，看网关终端日志 `jev evaluation error`。
+- **正常被拦 / 有害放行** → 调「安全阈值」（默认 0.5）或「安全判定指令」，分数越接近 1 越安全。
+- **一直 error / fail-open 放行** → 多半 JEV 密钥无效或网络不通，看日志 `jev evaluation error`。
 - **想临时全放行** → 关掉「启用过滤」总开关。
-- **忘记管理员口令** → 口令哈希是 `kv` 表里的单行 `admin_hash`。先**停止网关**并备份整个 `data\` 三件套，
-  再只删这一行（`DELETE FROM kv WHERE "key"='admin_hash';`，库内其余配置与日志全部保留），重启后
-  控制台会回到「首次配置」流程，此时 `JEV_ADMIN_PASSWORD` 也会重新生效。**不要用删库来重置口令**——
-  那会连同全部配置与审计日志一起永久丢失。删除前请确认备份副本可读。
+- **忘记管理员口令** → **先停止网关并备份 `data\` 三件套**，再只删 `kv` 表的 `admin_hash` 一行（`DELETE FROM kv WHERE "key"='admin_hash';`），重启走首次配置。**不要删库重置**——会连配置与审计日志一起永久丢失。
 
-## 本地 test 打包与启动（Windows）
+</details>
 
-`scripts\` 下的仓库脚本只有两个，产物都是同一个测试包目录（默认 `out\jev-safety-gateway\`）加一个 zip，可整包拷到测试机运行：
+---
 
-| 脚本 | 作用 |
-| --- | --- |
-| `start-local-test.ps1` | 构建 + 启动，日常用这个 |
-| `build-local-test.ps1` | 只打包 |
-
-同目录的 `template-start-jev-safety-gateway.ps1` / `template-stop-jev-safety-gateway.ps1` / `template-README.txt` 是**打包模板**：
-打包时被复制进测试包并去掉 `template-` 前缀。它们必须和 `jev-safety-gateway.exe` 同目录才能运行，
-在仓库里直接跑只会报错——那不是构建失败。
-
-### 构建并启动
-
-```powershell
-.\scripts\start-local-test.ps1                        # 前端 + 后端 → 打包 → 启动
-.\scripts\start-local-test.ps1 -SkipFrontend -NoZip    # 只构建后端、不出 zip，再启动（改 Go 代码时最快）
-.\scripts\start-local-test.ps1 -SkipBuild              # 不重新构建，直接重启已有测试包
-```
-
-构建前它会先停掉测试包里正在运行的网关——Windows 上 `jev-safety-gateway.exe` 被占用时 `go build` 无法覆盖它，
-不先停就会构建失败。测试包里已有的 `.env` 默认保留，不会被 `.env.example` 覆盖。
-
-**数据库落在仓库根目录的 `data\jev-safety-gateway.db`**，不是测试包目录：运行态和源码在同一棵树里，好找好备份，
-构建脚本的 `-Clean` 也只清测试包，碰不到它。启动前会打印一行 `数据库：<路径>` 便于核对。想换位置用 `-DbPath`。
-测试包目录里那份 `data\` 只在脱离仓库、直接用包内 `start-jev-safety-gateway.ps1` 启动（拷到测试机单独跑）时才会用到。
-
-> **不要删除仓库 `data\` 下的任何文件**（`jev-safety-gateway.db` 及其 `-wal` / `-shm`）。它不受版本控制、
-> `rm` 不进回收站、本机没有卷影副本——删掉就是永久丢失。注意 `-wal` 可能远大于主库（实测主库 40 KB /
-> WAL 3.4 MB），数据主要落在 WAL 里，**单独留下主库没有意义，三者必须作为一个整体保护**。需要重置配置时
-> 请先停止网关、备份副本，再取得明确同意后操作；忘记管理员口令的正确做法见「常见问题」，而不是删库。
-> （测试包内 `out\<包名>\data\` 是一次性构建产物，`-Clean` 清掉它不受此限。）
-
-| 参数 | 说明 |
-| --- | --- |
-| `-SkipBuild` | 跳过构建，直接启动已有测试包 |
-| `-OutputDir <路径>` | 测试包目录，默认 `out\jev-safety-gateway` |
-| `-DbPath <路径>` | 数据库路径，默认仓库根目录的 `data\jev-safety-gateway.db`；相对路径按仓库根解析 |
-| `-RefreshEnv` | 用 `.env.example` 覆盖测试包内的 `.env`（重置上游地址与密钥） |
-| `-NoRestart` | 包内已有网关在运行时不再自动停止，直接报错退出 |
-| `-Clean` | 构建前清空测试包目录（包内 `.env` 与 `data\` 一并删除；仓库根目录的 `data\` 不受影响） |
-| `-SkipFrontend` / `-Offline` / `-NoZip` | 透传给 `build-local-test.ps1` |
-| `-ProxyAddr` / `-AdminAddr` | 覆盖监听地址，默认 `:8080` / `127.0.0.1:8081` |
-
-### 只打包
-
-```powershell
-.\scripts\build-local-test.ps1                 # 前端 + 后端 → out\jev-safety-gateway\ + zip
-.\scripts\build-local-test.ps1 -SkipFrontend   # 只构建后端（前端沿用仓库已提交产物）
-.\scripts\build-local-test.ps1 -Offline        # 不联网：缺少 web\node_modules 时直接报错
-.\scripts\build-local-test.ps1 -KeepEnv        # 保留测试包里已有的 .env（不被 .env.example 覆盖）
-```
-
-| 参数 | 说明 |
-| --- | --- |
-| `-OutputDir <路径>` | 输出目录，默认 `out\jev-safety-gateway`，必须位于仓库内 |
-| `-SkipFrontend` | 跳过前端构建 |
-| `-SkipBackend` | 跳过后端构建（不能与 `-SkipFrontend` 同时使用） |
-| `-Offline` | 不访问网络，缺少前端依赖时报错退出 |
-| `-NoZip` | 不生成 zip |
-| `-Clean` | 构建前清空输出目录 |
-| `-KeepEnv` | 输出目录已有 `.env` 时保留，不用 `.env.example` 覆盖 |
-
-产物结构：
-
-```
-out\jev-safety-gateway\
-  jev-safety-gateway.exe  Go 后端二进制，管理控制台前端经 //go:embed 内嵌
-  .env               由 .env.example 生成的初始化配置，需填写上游地址与密钥
-  start-jev-safety-gateway.ps1  启动脚本（读取同目录 .env，数据库默认 data\jev-safety-gateway.db）
-  stop-jev-safety-gateway.ps1   停止脚本（按 jev-safety-gateway.pid 或进程路径匹配停止）
-  README.txt         包内使用说明（含构建时间、提交号与前端状态）
-out\jev-safety-gateway-<日期>-<短提交>.zip
-```
-
-在测试机上：解压 → 编辑 `.env` → 运行 `.\start-jev-safety-gateway.ps1` → 浏览器打开 `http://127.0.0.1:8081` 完成首次配置。
-
-## 项目结构
+## 🗂️ 项目结构
 
 ```
 cmd/jev-safety-gateway/    入口、环境变量初始化；Windows 服务入口（entry_windows.go）
@@ -421,7 +367,9 @@ docs/deployment.md         部署指南（三平台安装/升级/备份、单实
 Dockerfile, docker-compose.yml
 ```
 
-## 安全提示
+---
+
+## 🔒 安全提示
 
 - 管理控制台（`127.0.0.1:8081`）默认只绑本机。生产环境请置于内网，或在 nginx 层叠加 IP 白名单 / TLS / basic auth。
   远程访问请用 SSH 隧道（`ssh -L 8081:127.0.0.1:8081 <user>@<host>`），**不要**改绑 `0.0.0.0`——控制台除自身登录外没有别的保护。
@@ -431,3 +379,22 @@ Dockerfile, docker-compose.yml
   它只返回构建标识（版本、短提交号、构建时间、Go 版本）与实际绑定的监听地址，不含任何审计数据；
   审计日志派生的延迟分位在受保护的 `GET /api/stats/latency` 下。若这条公开面不可接受，
   请把管理口限制在内网——不要靠给它加 token 来收紧，那会让登录页退回降级态。
+
+---
+
+## 🎉 致谢
+
+本项目在 [LINUX DO](https://linux.do/) 社区推广，感谢 LINUX DO 社区对开源项目的支持与认可。
+
+---
+
+## 📄 开源协议
+
+JEV 安全网关采用**双授权**模式，版权归属 dark-hxx（Copyright © 2026 dark-hxx）。
+
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue)](LICENSE)
+
+- **开源版本** — [AGPL-3.0-or-later](LICENSE)。可在遵守 AGPL 条款的前提下使用、研究、修改、分发，或通过网络对外提供本项目。**注意**：AGPL 第 13 条要求，凡通过网络向用户提供本软件（含你的修改）的运行服务，必须向这些用户提供含修改在内的完整对应源码。
+- **商业授权** — 若希望以闭源 / 专有方式使用（集成进闭源或专有产品、不遵守 AGPL 的商业分发或捆绑、闭源改造用于产品化内部平台、基于本项目提供托管 / 代运维 / SaaS 类服务等），需单独取得商业授权，详见 [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md)。
+
+个人或公司正常使用未经修改的官方程序、以及遵守 AGPL-3.0-or-later 的开源使用，均无需商业授权。版权与第三方声明见 [NOTICE](NOTICE)。如需商业授权，请联系版权所有者 / 项目维护者。
