@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+
+<html class="light" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta content="web_dashboard" name="shell-type"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+@layer base {
+  html, body { margin: 0; padding: 0; }
+  body { overscroll-behavior: none; }
+  main > :first-child { margin-top: 0 !important; }
+  main > :last-child { margin-bottom: 0 !important; }
+}
+::-webkit-scrollbar { display: none; }
+</style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      "colors": {
+        "apple-bg": "#F5F5F7",
+        "surface-card": "#FFFFFF",
+        "hairline": "rgba(0, 0, 0, 0.08)",
+        "hairline-subtle": "#E5E5EA",
+        "apple-black": "#1D1D1F",
+        "apple-secondary": "#6E6E73",
+        "apple-tertiary": "#86868B",
+        "apple-muted": "#AEAEB2",
+        "apple-blue": "#007AFF",
+        "apple-blue-hover": "#0062CC",
+        "apple-blue-subtle": "rgba(0, 122, 255, 0.1)",
+        "apple-green": "#34C759",
+        "apple-green-text": "#248A3D",
+        "apple-green-subtle": "rgba(52, 199, 89, 0.12)",
+        "apple-red": "#FF3B30",
+        "apple-red-text": "#D70015",
+        "apple-red-subtle": "rgba(255, 59, 48, 0.12)",
+        "apple-orange": "#FF9500",
+        "apple-orange-text": "#C96F00",
+        "apple-orange-subtle": "rgba(255, 149, 0, 0.12)",
+        "sidebar-bg": "#F8F8FA"
+      },
+      "borderRadius": {
+        "DEFAULT": "0.25rem",
+        "lg": "0.5rem",
+        "xl": "0.75rem",
+        "2xl": "1rem",
+        "full": "9999px"
+      },
+      "spacing": {
+        "space-xs": "0.25rem",
+        "space-sm": "0.5rem",
+        "space-md": "1rem",
+        "space-lg": "1.5rem",
+        "space-xl": "2.25rem",
+        "gutter": "1.25rem",
+        "margin": "2rem"
+      },
+      "fontFamily": {
+        "title-1": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "title-2": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "title-3": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "headline": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "subheadline": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "body": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "callout": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "footnote": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "caption-1": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "caption-2": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+        "code-badge": ["JetBrains Mono", "monospace"],
+        "code-body": ["JetBrains Mono", "monospace"]
+      },
+      "fontSize": {
+        "title-1": ["28px", { "lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "700" }],
+        "title-2": ["22px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+        "title-3": ["20px", { "lineHeight": "25px", "letterSpacing": "-0.008em", "fontWeight": "600" }],
+        "headline": ["17px", { "lineHeight": "22px", "letterSpacing": "-0.005em", "fontWeight": "600" }],
+        "body": ["16px", { "lineHeight": "22px", "letterSpacing": "-0.003em", "fontWeight": "400" }],
+        "callout": ["15px", { "lineHeight": "20px", "letterSpacing": "-0.002em", "fontWeight": "400" }],
+        "subheadline": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+        "footnote": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
+        "caption-1": ["12px", { "lineHeight": "16px", "fontWeight": "500" }],
+        "caption-2": ["11px", { "lineHeight": "13px", "letterSpacing": "0.02em", "fontWeight": "600" }],
+        "code-badge": ["11px", { "lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "600" }],
+        "code-body": ["13px", { "lineHeight": "18px", "fontWeight": "400" }]
+      }
+    }
+  }
+};
+</script>
+</head>
+<body class="bg-apple-bg font-body text-apple-black antialiased selection:bg-apple-blue-subtle selection:text-apple-blue">
+<!-- Apple macOS Refined Sidebar -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-sidebar-bg border-r border-hairline-subtle z-50 flex flex-col justify-between py-space-md">
+<div class="flex flex-col gap-space-md">
+<div class="px-space-md flex items-center gap-space-sm">
+<img alt="JEV Shield Icon" class="h-8 w-8 rounded-lg object-contain shadow-sm border border-hairline" src="https://lh3.googleusercontent.com/aida/AEtjO1UQm1cb92xGPxpiNQIwI5rsMO0KsOYv3q3GTweNqkN5MRER-riCh3A0imumUeCSUXD2YIOJxxP3VGNEH4cuXNdzf32o8Ce_2XGUdT0zF7vi8BzDhcAgysCkM2AWWeDd5U2_hUS5Dm33-8IB5Z4QC9aTbktZIyzXnQ_z1k4mE5YF6CVFyaAhX4HpnzY2w9_H7xAeJKjdgnAa2fWlxoRZm2l0dG1NdIuyn8SBRiK2yCAbI6cl99i13AexHiI"/>
+<div class="flex flex-col">
+<span class="text-headline font-headline text-apple-black tracking-tight leading-tight">JEV Gateway</span>
+<span class="text-caption-2 font-caption-2 text-apple-secondary leading-tight">AI Safety Control</span>
+</div>
+</div>
+<div class="px-space-md pt-space-xs">
+<span class="text-caption-2 font-caption-2 uppercase tracking-wider text-apple-muted font-semibold">导航 Navigation</span>
+</div>
+<nav class="flex flex-col gap-space-xs px-space-sm" data-active-classes="bg-white text-apple-blue font-semibold shadow-[0_1px_4px_rgba(0,0,0,0.06)] border border-hairline">
+<a aria-current="page" class="flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all bg-white text-apple-blue font-semibold shadow-[0_1px_4px_rgba(0,0,0,0.06)] border border-hairline" data-path="overview" href="#">
+<span class="material-symbols-outlined text-[18px]">space_dashboard</span>
+<span>运行概览 Dashboard</span>
+</a>
+<a class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-subheadline font-subheadline text-apple-secondary hover:bg-white/60 hover:text-apple-black transition-all" data-path="settings" href="#">
+<span class="material-symbols-outlined text-[18px] text-apple-muted">admin_panel_settings</span>
+<span>网关安全配置 Gateway &amp; Security Settings</span>
+</a>
+<a class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-subheadline font-subheadline text-apple-secondary hover:bg-white/60 hover:text-apple-black transition-all" data-path="logs" href="#">
+<span class="material-symbols-outlined text-[18px] text-apple-muted">receipt_long</span>
+<span>转发审计记录 Forwarding &amp; Audit Stream</span>
+</a>
+</nav>
+</div>
+<div class="px-space-md flex flex-col gap-space-sm">
+<div class="p-space-sm rounded-xl bg-white border border-hairline shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex flex-col gap-space-xs">
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-apple-secondary">
+<span>Engine Core</span>
+<span class="font-code-badge text-code-badge text-apple-green-text bg-apple-green-subtle px-1.5 py-0.5 rounded">v2.4.1-rc</span>
+</div>
+<div class="flex items-center gap-space-xs text-caption-1 font-caption-1 text-apple-black">
+<span class="h-1.5 w-1.5 rounded-full bg-apple-green"></span>
+<span>TLS 1.3 Strict Mode</span>
+</div>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-apple-muted px-space-xs">
+<span>Apple HIG Spec</span>
+<span>macOS / iPadOS</span>
+</div>
+</div>
+</aside>
+<div class="pl-64">
+<!-- Translucent Cupertino Top Bar -->
+<header class="fixed top-0 left-64 right-0 h-16 z-40 bg-white/85 backdrop-blur-xl border-b border-hairline-subtle shadow-[0_1px_4px_rgba(0,0,0,0.03)]">
+<div class="h-16 w-full px-space-md flex items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md min-w-max">
+<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-apple-green-subtle border border-apple-green/20">
+<span class="h-2 w-2 rounded-full bg-apple-green animate-pulse"></span>
+<span class="text-caption-2 font-caption-2 text-apple-green-text font-semibold">已启用过滤 · Filtering Active</span>
+</div>
+<div class="flex items-center gap-2 pl-space-xs">
+<span class="text-caption-2 font-caption-2 text-apple-secondary font-medium">主网关防护</span>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-[#E5E5EA] rounded-full peer peer-checked:bg-apple-green peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all shadow-sm"></div>
+</label>
+</div>
+</div>
+<div class="flex items-center gap-space-md">
+<!-- Segmented Control (Light Active) -->
+<div class="inline-flex items-center p-0.5 rounded-lg bg-[#EFEFF4] border border-hairline">
+<button class="px-2.5 py-1 rounded-md text-caption-2 font-caption-2 text-apple-secondary hover:text-apple-black transition-colors" type="button">跟随系统</button>
+<button class="px-2.5 py-1 rounded-md text-caption-2 font-caption-2 bg-white text-apple-black font-semibold shadow-[0_1px_3px_rgba(0,0,0,0.08)]" type="button">浅色</button>
+<button class="px-2.5 py-1 rounded-md text-caption-2 font-caption-2 text-apple-secondary hover:text-apple-black transition-colors" type="button">深色</button>
+</div>
+<!-- Language Switcher -->
+<div class="inline-flex items-center p-0.5 rounded-lg bg-[#EFEFF4] border border-hairline">
+<button class="px-2 py-1 rounded-md text-caption-2 font-caption-2 bg-white text-apple-black font-semibold shadow-[0_1px_3px_rgba(0,0,0,0.08)]" type="button">中</button>
+<button class="px-2 py-1 rounded-md text-caption-2 font-caption-2 text-apple-secondary hover:text-apple-black transition-colors" type="button">EN</button>
+</div>
+<button class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-hairline hover:bg-apple-bg text-subheadline font-subheadline text-apple-black transition-all shadow-[0_1px_2px_rgba(0,0,0,0.03)]" type="button">
+<span class="material-symbols-outlined text-[16px] text-apple-secondary">logout</span>
+<span>退出</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-apple-blue flex items-center justify-center text-white shadow-sm font-semibold text-xs">
+<span class="material-symbols-outlined text-white text-[18px]">person</span>
+</div>
+</div>
+</div>
+</header>
+<main class="relative w-full pt-16 bg-apple-bg px-margin py-margin min-h-screen">
+<div class="flex flex-col w-full gap-space-lg">
+<!-- Subtle Cupertino Background Glow -->
+<div class="relative w-full">
+<div class="absolute -top-10 -left-16 w-80 h-80 bg-apple-blue/5 rounded-full blur-3xl pointer-events-none -z-10"></div>
+<div class="absolute top-16 right-0 w-80 h-80 bg-apple-green/5 rounded-full blur-3xl pointer-events-none -z-10"></div>
+</div>
+<!-- 1. Top Cockpit Banner & Live Telemetry Glass Card -->
+<section class="relative overflow-hidden rounded-2xl bg-white/90 backdrop-blur-xl p-space-lg shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-hairline">
+<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-space-md">
+<div class="flex items-start sm:items-center gap-space-md">
+<div class="relative flex items-center justify-center w-14 h-14 rounded-2xl bg-apple-blue-subtle text-apple-blue border border-apple-blue/20 shadow-sm">
+<span class="material-symbols-outlined text-[32px]">shield_lock</span>
+<span class="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-apple-green opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3.5 w-3.5 bg-apple-green"></span>
+</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-space-xs flex-wrap">
+<h1 class="text-title-1 font-title-1 text-apple-black tracking-tight">安全监控驾驶舱</h1>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-apple-green-subtle text-apple-green-text font-semibold border border-apple-green/20">
+ENGINE v2.4.1-rc3
+</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-caption-2 font-caption-2 bg-apple-bg text-apple-secondary border border-hairline font-medium">
+Zero-Trust TLS 1.3
+</span>
+</div>
+<p class="text-subheadline font-subheadline text-apple-secondary mt-0.5">
+实时流量深度规约 · 提示词越狱阻断 · PII 数据脱敏路由保护
+</p>
+</div>
+</div>
+<!-- Quick Metrics Ribbon -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-space-sm bg-apple-bg/80 border border-hairline-subtle p-space-sm rounded-xl">
+<div class="flex flex-col px-space-xs">
+<span class="text-caption-2 font-caption-2 text-apple-secondary uppercase font-semibold">实时吞吐 (24h)</span>
+<span class="text-headline font-headline text-apple-black mt-0.5">1,482,920</span>
+<span class="text-caption-1 font-caption-1 text-apple-green-text font-semibold flex items-center gap-0.5">
+<span class="material-symbols-outlined text-[14px]">trending_up</span> +12.4%
+</span>
+</div>
+<div class="flex flex-col px-space-xs">
+<span class="text-caption-2 font-caption-2 text-apple-secondary uppercase font-semibold">峰值流量 PPS</span>
+<span class="text-headline font-headline text-apple-black mt-0.5">842 <span class="text-caption-1 font-caption-1 text-apple-secondary font-normal">req/s</span></span>
+<span class="text-caption-1 font-caption-1 text-apple-muted">P99: 890 req/s</span>
+</div>
+<div class="flex flex-col px-space-xs">
+<span class="text-caption-2 font-caption-2 text-apple-secondary uppercase font-semibold">网关状态</span>
+<div class="flex items-center gap-1.5 mt-1">
+<span class="w-2 h-2 rounded-full bg-apple-green"></span>
+<span class="text-caption-1 font-caption-1 text-apple-green-text font-semibold">Active · 零异常</span>
+</div>
+<span class="text-caption-2 font-caption-2 text-apple-muted">Strict Mode</span>
+</div>
+<div class="flex flex-col px-space-xs">
+<span class="text-caption-2 font-caption-2 text-apple-secondary uppercase font-semibold">集群实例</span>
+<span class="text-headline font-headline text-apple-blue mt-0.5">3 / 6 <span class="text-caption-1 font-caption-1 text-apple-secondary font-normal">Nodes</span></span>
+<span class="text-caption-2 font-caption-2 text-apple-green-text font-semibold">100% SLA 在线</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 2. Primary Key Metric Widgets (Grid of 6 Cards) -->
+<section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-space-md">
+<!-- Card 1: Total Reqs -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-apple-secondary font-medium">24h 总请求量</span>
+<span class="material-symbols-outlined text-apple-blue text-[18px]">swap_horiz</span>
+</div>
+<div class="my-space-sm">
+<div class="text-title-2 font-title-2 text-apple-black tracking-tight">1,482,920</div>
+<div class="text-caption-2 font-caption-2 text-apple-green-text font-semibold flex items-center gap-1 mt-0.5">
+<span class="material-symbols-outlined text-[13px]">north_east</span> +12.4% 环比昨日
+</div>
+</div>
+<!-- Mini SVG Sparkline -->
+<div class="w-full h-7 mt-1 overflow-hidden">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 24">
+<path class="text-apple-blue" d="M0 18 Q 20 20, 35 12 T 65 8 T 85 14 T 100 4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path>
+<path class="text-apple-blue/10" d="M0 18 Q 20 20, 35 12 T 65 8 T 85 14 T 100 4 L 100 24 L 0 24 Z" fill="currentColor"></path>
+</svg>
+</div>
+</div>
+<!-- Card 2: Allowed Safe Rate -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-apple-secondary font-medium">正常放行率</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-apple-green-subtle text-apple-green-text border border-apple-green/20">
+Normal
+</span>
+</div>
+<div class="my-space-sm">
+<div class="text-title-2 font-title-2 text-apple-black tracking-tight">98.39%</div>
+<div class="text-caption-2 font-caption-2 text-apple-muted mt-0.5">1,459,102 次放行请求</div>
+</div>
+<!-- Progress Bar -->
+<div class="w-full bg-[#E5E5EA] rounded-full h-1.5 overflow-hidden">
+<div class="bg-apple-green h-1.5 rounded-full" style="width: 98.39%"></div>
+</div>
+</div>
+<!-- Card 3: Blocked Attacks -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-apple-secondary font-medium">高危威胁拦截</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-apple-red-subtle text-apple-red-text border border-apple-red/20">
+Blocked
+</span>
+</div>
+<div class="my-space-sm">
+<div class="text-title-2 font-title-2 text-apple-red-text tracking-tight">21,493</div>
+<div class="text-caption-2 font-caption-2 text-apple-red-text/80 mt-0.5">占比 1.45% · 深度沙箱拦截</div>
+</div>
+<!-- Mini Sparkline for attacks -->
+<div class="w-full h-7 mt-1 overflow-hidden">
+<svg class="w-full h-full" preserveaspectratio="none" viewbox="0 0 100 24">
+<path class="text-apple-red" d="M0 20 Q 25 18, 40 8 T 60 18 T 80 4 T 100 12" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path>
+<path class="text-apple-red/10" d="M0 20 Q 25 18, 40 8 T 60 18 T 80 4 T 100 12 L 100 24 L 0 24 Z" fill="currentColor"></path>
+</svg>
+</div>
+</div>
+<!-- Card 4: Skipped / Policy Fallback -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-apple-secondary font-medium">策略跳过与降级</span>
+<span class="material-symbols-outlined text-apple-secondary text-[18px]">alt_route</span>
+</div>
+<div class="my-space-sm">
+<div class="text-title-2 font-title-2 text-apple-black tracking-tight">2,184</div>
+<div class="text-caption-2 font-caption-2 text-apple-muted mt-0.5">占比 0.14% · 白名单策略生效</div>
+</div>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1.5 overflow-hidden">
+<div class="bg-apple-secondary h-1.5 rounded-full" style="width: 14%"></div>
+</div>
+</div>
+<!-- Card 5: Fail-Open Degraded -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-apple-secondary font-medium">异常容灾放行</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-apple-orange-subtle text-apple-orange-text border border-apple-orange/20">
+Fail-Open
+</span>
+</div>
+<div class="my-space-sm">
+<div class="text-title-2 font-title-2 text-apple-orange-text tracking-tight">141</div>
+<div class="text-caption-2 font-caption-2 text-apple-secondary mt-0.5">占比 0.009% · 检定超时熔断</div>
+</div>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1.5 overflow-hidden">
+<div class="bg-apple-orange h-1.5 rounded-full" style="width: 8%"></div>
+</div>
+</div>
+<!-- Card 6: Latency Distribution -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<span class="text-caption-1 font-caption-1 text-apple-secondary font-medium">P99 检定延迟</span>
+<span class="material-symbols-outlined text-apple-blue text-[18px]">speed</span>
+</div>
+<div class="my-space-sm">
+<div class="text-title-2 font-title-2 text-apple-black tracking-tight">36.8 <span class="text-footnote font-footnote text-apple-secondary font-normal">ms</span></div>
+<div class="text-caption-2 font-caption-2 text-apple-green-text font-semibold mt-0.5">平均 18.2ms · 吞吐稳态</div>
+</div>
+<!-- Latency histogram bars -->
+<div class="flex items-end gap-1 h-7 pt-1">
+<div class="w-full bg-apple-green/30 rounded-t h-[30%]"></div>
+<div class="w-full bg-apple-green/50 rounded-t h-[55%]"></div>
+<div class="w-full bg-apple-green rounded-t h-[85%]"></div>
+<div class="w-full bg-apple-green/70 rounded-t h-[40%]"></div>
+<div class="w-full bg-apple-orange/70 rounded-t h-[20%]"></div>
+<div class="w-full bg-apple-red/70 rounded-t h-[8%]"></div>
+</div>
+</div>
+</section>
+<!-- 3. Cockpit Charts & Analytics Center (2-Column Asymmetrical Grid) -->
+<section class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg">
+<!-- Left Column: 24h Traffic & Threat Trend (7 Cols) -->
+<div class="xl:col-span-7 flex flex-col p-space-lg rounded-2xl bg-white border border-hairline shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm mb-space-md">
+<div class="flex flex-col">
+<span class="text-title-3 font-title-3 text-apple-black">24h 流量与安全威胁态势</span>
+<span class="text-caption-1 font-caption-1 text-apple-secondary">实时聚合遥测数据 · 刷新周期 5s</span>
+</div>
+<!-- Cupertino Segmented Control -->
+<div class="inline-flex p-0.5 bg-[#EFEFF4] border border-hairline rounded-lg self-start">
+<button class="px-3 py-1 rounded-md text-caption-2 font-caption-2 text-apple-secondary hover:text-apple-black transition-all" type="button">1h</button>
+<button class="px-3 py-1 rounded-md text-caption-2 font-caption-2 text-apple-secondary hover:text-apple-black transition-all" type="button">6h</button>
+<button class="px-3 py-1 rounded-md text-caption-2 font-caption-2 bg-white text-apple-black shadow-sm font-semibold" type="button">24h</button>
+<button class="px-3 py-1 rounded-md text-caption-2 font-caption-2 text-apple-secondary hover:text-apple-black transition-all" type="button">7d</button>
+</div>
+</div>
+<!-- Legend Indicator -->
+<div class="flex items-center gap-space-md mb-space-sm text-caption-2 font-caption-2 flex-wrap">
+<div class="flex items-center gap-1.5">
+<span class="w-2.5 h-2.5 rounded-full bg-apple-blue"></span>
+<span class="text-apple-secondary font-medium">入站总请求 (Total Traffic)</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="w-2.5 h-2.5 rounded-full bg-apple-green"></span>
+<span class="text-apple-secondary font-medium">安全放行 (Allowed)</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="w-2.5 h-2.5 rounded-full bg-apple-red"></span>
+<span class="text-apple-secondary font-medium">越狱/攻击拦截 (Blocked)</span>
+</div>
+</div>
+<!-- Main Rich SVG Timeline Area Chart -->
+<div class="relative w-full h-72 rounded-xl bg-apple-bg/60 border border-hairline-subtle p-space-sm flex flex-col justify-end">
+<svg class="w-full h-full" fill="none" preserveaspectratio="none" viewbox="0 0 700 240">
+<defs>
+<lineargradient id="trafficGradient" x1="0" x2="0" y1="0" y2="1">
+<stop offset="0%" stop-color="#007AFF" stop-opacity="0.22"></stop>
+<stop offset="100%" stop-color="#007AFF" stop-opacity="0.0"></stop>
+</lineargradient>
+<lineargradient id="attackGradient" x1="0" x2="0" y1="0" y2="1">
+<stop offset="0%" stop-color="#FF3B30" stop-opacity="0.28"></stop>
+<stop offset="100%" stop-color="#FF3B30" stop-opacity="0.0"></stop>
+</lineargradient>
+</defs>
+<!-- Grid Background lines -->
+<line opacity="0.8" stroke="#E5E5EA" stroke-dasharray="3 3" x1="0" x2="700" y1="40" y2="40"></line>
+<line opacity="0.8" stroke="#E5E5EA" stroke-dasharray="3 3" x1="0" x2="700" y1="100" y2="100"></line>
+<line opacity="0.8" stroke="#E5E5EA" stroke-dasharray="3 3" x1="0" x2="700" y1="160" y2="160"></line>
+<line opacity="0.8" stroke="#E5E5EA" stroke-dasharray="3 3" x1="0" x2="700" y1="220" y2="220"></line>
+<!-- Area: Inbound Traffic -->
+<path d="M 0 170 C 60 160, 110 130, 180 125 C 240 120, 290 90, 360 80 C 430 70, 480 100, 540 85 C 600 70, 650 45, 700 35 L 700 230 L 0 230 Z" fill="url(#trafficGradient)"></path>
+<path d="M 0 170 C 60 160, 110 130, 180 125 C 240 120, 290 90, 360 80 C 430 70, 480 100, 540 85 C 600 70, 650 45, 700 35" stroke="#007AFF" stroke-linecap="round" stroke-width="2.5"></path>
+<!-- Line: Allowed Traffic -->
+<path d="M 0 174 C 60 164, 110 134, 180 129 C 240 124, 290 94, 360 84 C 430 74, 480 104, 540 89 C 600 74, 650 49, 700 39" stroke="#34C759" stroke-linecap="round" stroke-width="2"></path>
+<!-- Area: Attacks & Injections (Red spikes around midday & night) -->
+<path d="M 0 225 C 90 225, 140 220, 190 200 C 230 185, 270 215, 330 215 C 380 215, 410 155, 460 145 C 510 135, 540 215, 600 218 C 650 220, 680 210, 700 212 L 700 230 L 0 230 Z" fill="url(#attackGradient)"></path>
+<path d="M 0 225 C 90 225, 140 220, 190 200 C 230 185, 270 215, 330 215 C 380 215, 410 155, 460 145 C 510 135, 540 215, 600 218 C 650 220, 680 210, 700 212" stroke="#FF3B30" stroke-linecap="round" stroke-width="2"></path>
+<!-- Peak Marker Pin -->
+<circle class="animate-pulse" cx="460" cy="145" fill="#FF3B30" r="4.5"></circle>
+<line opacity="0.6" stroke="#FF3B30" stroke-dasharray="2 2" stroke-width="1.5" x1="460" x2="460" y1="145" y2="230"></line>
+</svg>
+<!-- X-Axis Timeline Labels -->
+<div class="flex justify-between items-center text-caption-2 font-caption-2 text-apple-secondary pt-2 px-1">
+<span>00:00</span>
+<span>04:00</span>
+<span>08:00</span>
+<span class="font-medium text-apple-red-text">12:00 (突发注入峰值)</span>
+<span>16:00</span>
+<span>20:00</span>
+<span>当前 (23:59)</span>
+</div>
+</div>
+<div class="flex items-center justify-between pt-space-md text-caption-1 font-caption-1 text-apple-secondary">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-apple-green text-[16px]">verified</span>
+<span class="text-apple-black font-medium">过去 24 小时未触发网关熔断机制</span>
+</div>
+<span class="font-code-body text-code-body text-apple-muted">Upstream avg: 142ms</span>
+</div>
+</div>
+<!-- Right Column: Threat Intelligence Taxonomy (5 Cols) -->
+<div class="xl:col-span-5 flex flex-col justify-between p-space-lg rounded-2xl bg-white border border-hairline shadow-[0_2px_12px_rgba(0,0,0,0.04)]">
+<div class="flex items-center justify-between mb-space-sm">
+<div class="flex flex-col">
+<span class="text-title-3 font-title-3 text-apple-black">安全威胁类型分布</span>
+<span class="text-caption-1 font-caption-1 text-apple-secondary">已拦截 21,493 恶意违规调用</span>
+</div>
+<span class="material-symbols-outlined text-apple-muted text-[20px]">donut_large</span>
+</div>
+<!-- Visual Donut Center Graphic (Inline SVG) -->
+<div class="flex items-center justify-center my-space-sm">
+<div class="relative w-44 h-44 flex items-center justify-center">
+<svg class="w-full h-full -rotate-90" viewbox="0 0 100 100">
+<!-- Background Ring -->
+<circle cx="50" cy="50" fill="none" r="38" stroke="#F2F2F7" stroke-width="12"></circle>
+<!-- Slice 1: Prompt Injection (48.2%) - Apple Red -->
+<circle cx="50" cy="50" fill="none" r="38" stroke="#FF3B30" stroke-dasharray="238.7" stroke-dashoffset="123.6" stroke-linecap="round" stroke-width="12"></circle>
+<!-- Slice 2: PII Leak (24.1%) - Apple Orange -->
+<circle cx="50" cy="50" fill="none" r="38" stroke="#FF9500" stroke-dasharray="238.7" stroke-dashoffset="181.2" stroke-width="12" transform="rotate(173 50 50)"></circle>
+<!-- Slice 3: Web Flood (16.5%) - Apple Blue -->
+<circle cx="50" cy="50" fill="none" r="38" stroke="#007AFF" stroke-dasharray="238.7" stroke-dashoffset="199.3" stroke-width="12" transform="rotate(260 50 50)"></circle>
+<!-- Slice 4: Policy Violation (11.2%) - Apple Secondary / Muted Gray -->
+<circle cx="50" cy="50" fill="none" r="38" stroke="#8E8E93" stroke-dasharray="238.7" stroke-dashoffset="212" stroke-width="12" transform="rotate(320 50 50)"></circle>
+</svg>
+<div class="absolute flex flex-col items-center justify-center text-center">
+<span class="text-caption-2 font-caption-2 uppercase text-apple-muted font-semibold tracking-wider">拦截首位</span>
+<span class="text-title-2 font-title-2 text-apple-black font-bold">48.2%</span>
+<span class="text-caption-2 font-caption-2 text-apple-red-text font-semibold">越狱注入</span>
+</div>
+</div>
+</div>
+<!-- Threat Taxonomy Breakdown Bars -->
+<div class="flex flex-col gap-space-sm pt-space-xs">
+<!-- Item 1 -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between text-subheadline font-subheadline">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-apple-red"></span>
+<span class="text-apple-black">Prompt Injection / 越狱绕过攻击</span>
+</div>
+<span class="font-code-body text-code-body text-apple-red-text font-semibold">10,360 次 (48.2%)</span>
+</div>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1.5 overflow-hidden">
+<div class="bg-apple-red h-1.5 rounded-full" style="width: 48.2%"></div>
+</div>
+</div>
+<!-- Item 2 -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between text-subheadline font-subheadline">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-apple-orange"></span>
+<span class="text-apple-black">PII 敏感隐私泄露防范 (身份证/API Key)</span>
+</div>
+<span class="font-code-body text-code-body text-apple-orange-text font-semibold">5,180 次 (24.1%)</span>
+</div>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1.5 overflow-hidden">
+<div class="bg-apple-orange h-1.5 rounded-full" style="width: 24.1%"></div>
+</div>
+</div>
+<!-- Item 3 -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between text-subheadline font-subheadline">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-apple-blue"></span>
+<span class="text-apple-black">自动爬虫 / 高频泛洪攻击</span>
+</div>
+<span class="font-code-body text-code-body text-apple-blue font-semibold">3,546 次 (16.5%)</span>
+</div>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1.5 overflow-hidden">
+<div class="bg-apple-blue h-1.5 rounded-full" style="width: 16.5%"></div>
+</div>
+</div>
+<!-- Item 4 -->
+<div class="flex flex-col gap-1">
+<div class="flex items-center justify-between text-subheadline font-subheadline">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-[#8E8E93]"></span>
+<span class="text-apple-black">违规内容审查与有害提示</span>
+</div>
+<span class="font-code-body text-code-body text-apple-secondary font-semibold">2,407 次 (11.2%)</span>
+</div>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1.5 overflow-hidden">
+<div class="bg-[#8E8E93] h-1.5 rounded-full" style="width: 11.2%"></div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 4. Bottom Telemetry & Cluster Node Health Overview -->
+<section class="flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="text-title-3 font-title-3 text-apple-black">全球边缘集群运行状态</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-caption-2 font-caption-2 bg-apple-green-subtle text-apple-green-text font-semibold border border-apple-green/20">
+3 节点集群健康
+</span>
+</div>
+<span class="text-caption-2 font-caption-2 text-apple-secondary">动态负载均衡器状态: BGP Anycast Active</span>
+</div>
+<!-- Cluster Nodes Grid (3 Cards) -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-md">
+<!-- Cluster Tokyo -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-apple-green text-[20px]">dns</span>
+<div class="flex flex-col">
+<span class="text-headline font-headline text-apple-black leading-tight">Cluster-East-01</span>
+<span class="text-caption-2 font-caption-2 text-apple-secondary">亚太东部 · 东京 (Tokyo)</span>
+</div>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-apple-green-subtle text-apple-green-text border border-apple-green/20">
+Healthy
+</span>
+</div>
+<div class="grid grid-cols-2 gap-space-sm my-space-md bg-apple-bg/80 border border-hairline-subtle p-space-sm rounded-xl">
+<div class="flex flex-col">
+<span class="text-caption-2 font-caption-2 text-apple-secondary font-medium">CPU &amp; 负载</span>
+<span class="text-headline font-headline text-apple-black">34%</span>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1 mt-1">
+<div class="bg-apple-green h-1 rounded-full" style="width: 34%"></div>
+</div>
+</div>
+<div class="flex flex-col">
+<span class="text-caption-2 font-caption-2 text-apple-secondary font-medium">RTT 延迟</span>
+<span class="text-headline font-headline text-apple-black">16 <span class="text-caption-1 font-caption-1 text-apple-secondary font-normal">ms</span></span>
+<span class="text-caption-2 font-caption-2 text-apple-green-text font-semibold">Optimal</span>
+</div>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-apple-secondary pt-space-xs">
+<span>安全凭据池</span>
+<span class="font-code-body text-code-body text-apple-black font-medium">4 / 4 可用 (100%)</span>
+</div>
+</div>
+<!-- Cluster Beijing -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-apple-blue text-[20px]">dns</span>
+<div class="flex flex-col">
+<span class="text-headline font-headline text-apple-black leading-tight">Cluster-Central-02</span>
+<span class="text-caption-2 font-caption-2 text-apple-secondary">亚太核心 · 北京 (Beijing)</span>
+</div>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-apple-green-subtle text-apple-green-text border border-apple-green/20">
+Healthy
+</span>
+</div>
+<div class="grid grid-cols-2 gap-space-sm my-space-md bg-apple-bg/80 border border-hairline-subtle p-space-sm rounded-xl">
+<div class="flex flex-col">
+<span class="text-caption-2 font-caption-2 text-apple-secondary font-medium">CPU &amp; 负载</span>
+<span class="text-headline font-headline text-apple-black">68%</span>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1 mt-1">
+<div class="bg-apple-blue h-1 rounded-full" style="width: 68%"></div>
+</div>
+</div>
+<div class="flex flex-col">
+<span class="text-caption-2 font-caption-2 text-apple-secondary font-medium">RTT 延迟</span>
+<span class="text-headline font-headline text-apple-black">22 <span class="text-caption-1 font-caption-1 text-apple-secondary font-normal">ms</span></span>
+<span class="text-caption-2 font-caption-2 text-apple-green-text font-semibold">Steady</span>
+</div>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-apple-secondary pt-space-xs">
+<span>安全凭据池</span>
+<span class="font-code-body text-code-body text-apple-black font-medium">6 / 6 可用 (100%)</span>
+</div>
+</div>
+<!-- Cluster Frankfurt -->
+<div class="flex flex-col justify-between p-space-md rounded-2xl bg-white border border-hairline shadow-[0_2px_8px_rgba(0,0,0,0.03)] hover:shadow-md transition-all">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-apple-muted text-[20px]">dns</span>
+<div class="flex flex-col">
+<span class="text-headline font-headline text-apple-black leading-tight">Cluster-West-03</span>
+<span class="text-caption-2 font-caption-2 text-apple-secondary">欧洲西部 · 法兰克福 (Frankfurt)</span>
+</div>
+</div>
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-apple-bg text-apple-secondary border border-hairline">
+Standby
+</span>
+</div>
+<div class="grid grid-cols-2 gap-space-sm my-space-md bg-apple-bg/80 border border-hairline-subtle p-space-sm rounded-xl">
+<div class="flex flex-col">
+<span class="text-caption-2 font-caption-2 text-apple-secondary font-medium">CPU &amp; 负载</span>
+<span class="text-headline font-headline text-apple-black">12%</span>
+<div class="w-full bg-[#E5E5EA] rounded-full h-1 mt-1">
+<div class="bg-apple-muted h-1 rounded-full" style="width: 12%"></div>
+</div>
+</div>
+<div class="flex flex-col">
+<span class="text-caption-2 font-caption-2 text-apple-secondary font-medium">RTT 延迟</span>
+<span class="text-headline font-headline text-apple-black">42 <span class="text-caption-1 font-caption-1 text-apple-secondary font-normal">ms</span></span>
+<span class="text-caption-2 font-caption-2 text-apple-muted">Cold Cache</span>
+</div>
+</div>
+<div class="flex items-center justify-between text-caption-2 font-caption-2 text-apple-secondary pt-space-xs">
+<span>安全凭据池</span>
+<span class="font-code-body text-code-body text-apple-black font-medium">2 / 2 可用 (100%)</span>
+</div>
+</div>
+</div>
+<!-- Quick Jump iOS-Style Action Tiles -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-md mt-space-xs">
+<a class="flex items-center justify-between p-space-md rounded-2xl bg-white border border-hairline hover:border-apple-blue/30 hover:shadow-md transition-all group shadow-[0_2px_8px_rgba(0,0,0,0.03)]" href="#">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl bg-apple-blue-subtle flex items-center justify-center text-apple-blue group-hover:bg-apple-blue group-hover:text-white transition-all shadow-sm">
+<span class="material-symbols-outlined text-[22px]">tune</span>
+</div>
+<div class="flex flex-col">
+<span class="text-headline font-headline text-apple-black group-hover:text-apple-blue transition-colors">调整网关安全过滤策略与规则</span>
+<span class="text-caption-1 font-caption-1 text-apple-secondary">配置 LLM 越狱阻断阈值、PII 掩码规则与 API 上游路由</span>
+</div>
+</div>
+<div class="flex items-center gap-1 text-apple-secondary group-hover:text-apple-blue transition-colors">
+<span class="text-caption-1 font-caption-1 font-semibold">网关配置</span>
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</div>
+</a>
+<a class="flex items-center justify-between p-space-md rounded-2xl bg-white border border-hairline hover:border-apple-green/30 hover:shadow-md transition-all group shadow-[0_2px_8px_rgba(0,0,0,0.03)]" href="#">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded-xl bg-apple-green-subtle flex items-center justify-center text-apple-green-text group-hover:bg-apple-green group-hover:text-white transition-all shadow-sm">
+<span class="material-symbols-outlined text-[22px]">manage_search</span>
+</div>
+<div class="flex flex-col">
+<span class="text-headline font-headline text-apple-black group-hover:text-apple-green-text transition-colors">实时检定流与转发审计日志</span>
+<span class="text-caption-1 font-caption-1 text-apple-secondary">查看详细客户端 IP、敏感字段摘要及高危攻击取证 Payload</span>
+</div>
+</div>
+<div class="flex items-center gap-1 text-apple-secondary group-hover:text-apple-green-text transition-colors">
+<span class="text-caption-1 font-caption-1 font-semibold">审计流水</span>
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</div>
+</a>
+</div>
+</section>
+</div>
+</main>
+</div>
+</body></html>
