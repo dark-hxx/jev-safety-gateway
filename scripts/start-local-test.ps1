@@ -45,7 +45,7 @@
     代理监听地址，默认 :8080。
 
 .PARAMETER AdminAddr
-    管理控制台监听地址，默认 :8081。
+    管理控制台监听地址，默认 127.0.0.1:8081（只绑本机）。
 
 .PARAMETER DbPath
     数据库路径，默认仓库根目录的 data\jev-safety-gateway.db。相对路径按仓库根目录解析。
@@ -76,7 +76,7 @@ param(
     [switch]$Offline,
     [switch]$NoZip,
     [string]$ProxyAddr = ':8080',
-    [string]$AdminAddr = ':8081',
+    [string]$AdminAddr = '127.0.0.1:8081',
     [string]$DbPath = ''
 )
 

@@ -1,0 +1,178 @@
+name: Release
+
+# 打 tag 即出全平台产物；workflow_dispatch 用于在分支上试打包（不会建 Release）。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # gh release create
+  packages: write   # 推 ghcr.io 镜像
+
+jobs:
+  # 版本号只在这里算一次，三个产物共用，避免各平台算出不同结果。
+  identity:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.id.outputs.version }}
+      commit: ${{ steps.id.outputs.commit }}
+      build_time: ${{ steps.id.outputs.build_time }}
+      image: ${{ steps.id.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: id
+        name: 推导版本号
+        run: |
+          set -euo pipefail
+          # 版本真源是 web/package.json（与 scripts/build-local-test.ps1 一致）；
+          # 仓库没有 tag 的习惯时它是唯一的版本来源。tag 推送则以 tag 为准。
+          base="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' web/package.json | head -n1)"
+          base="${base:-0.0.0}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${base}-dev.$(git rev-parse --short HEAD)"
+          fi
+          {
+            echo "version=$version"
+            echo "commit=$(git rev-parse --short HEAD)"
+            echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            # ghcr.io 只接受全小写路径，而 github.repository 保留原大小写
+            # （owner 叫 Alice 就是 Alice/jev）。直接拼会把镜像推到一个不存在
+            # 的仓库并在 push 阶段被 registry 拒绝，所以统一转小写。
+            echo "image=ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          } >> "$GITHUB_OUTPUT"
+          echo "version=$version"
+
+  build:
+    needs: identity
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, ext: '',    archive: tar.gz }
+          - { goos: linux,   goarch: arm64, ext: '',    archive: tar.gz }
+          - { goos: windows, goarch: amd64, ext: '.exe', archive: zip }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 构建
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ needs.identity.outputs.version }}
+          COMMIT: ${{ needs.identity.outputs.commit }}
+          BUILD_TIME: ${{ needs.identity.outputs.build_time }}
+        run: |
+          set -eux
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
+            -o "dist/jev-safety-gateway${{ matrix.ext }}" ./cmd/jev-safety-gateway
+
+      - name: 组装发布包
+        env:
+          VERSION: ${{ needs.identity.outputs.version }}
+        run: |
+          set -eux
+          pkg="jev-safety-gateway-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "dist/${pkg}"
+          mv "dist/jev-safety-gateway${{ matrix.ext }}" "dist/${pkg}/"
+
+          # 部署文档随包分发：包里就带升级与备份注意事项，不必回头翻仓库。
+          cp docs/deployment.md "dist/${pkg}/" 2>/dev/null || true
+
+          if [ "${{ matrix.goos }}" = linux ]; then
+            cp deploy/systemd/jev-safety-gateway.service "dist/${pkg}/"
+            cp deploy/systemd/env.example "dist/${pkg}/"
+            cp deploy/linux/install.sh "dist/${pkg}/"
+            chmod +x "dist/${pkg}/install.sh"
+          else
+            cp scripts/install-service.ps1 "dist/${pkg}/"
+            cp scripts/uninstall-service.ps1 "dist/${pkg}/"
+            cp .env.example "dist/${pkg}/env.example"
+          fi
+
+          cd dist
+          if [ "${{ matrix.archive }}" = zip ]; then
+            zip -r "${pkg}.zip" "${pkg}"
+          else
+            tar czf "${pkg}.tar.gz" "${pkg}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  image:
+    needs: identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.identity.outputs.image }}
+          tags: |
+            type=raw,value=${{ needs.identity.outputs.version }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,prefix=sha-
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # .git 不在构建上下文里，镜像内的构建标识只能这样传进去；
+          # VERSION 显式传，免得 Dockerfile 退回从 web/package.json 自解析。
+          build-args: |
+            VERSION=${{ needs.identity.outputs.version }}
+            COMMIT=${{ needs.identity.outputs.commit }}
+            BUILD_TIME=${{ needs.identity.outputs.build_time }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    needs: [identity, build, image]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: 建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.identity.outputs.version }}
+        run: |
+          set -eux
+          gh release create "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --title "v${VERSION}" \
+            --generate-notes \
+            artifacts/*.tar.gz artifacts/*.zip

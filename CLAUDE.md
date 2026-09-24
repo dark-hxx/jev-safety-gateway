@@ -17,8 +17,11 @@ go vet ./...                         # static checks
 go test ./...                        # unit tests (config aggregation, admin API + SPA fallback, embedded dist)
 
 # run locally — the DB lands in ./data/jev-safety-gateway.db relative to the working directory
-JEV_PROXY_ADDR=:8080 JEV_ADMIN_ADDR=:8081 ./jev-safety-gateway
-# PowerShell: .\jev-safety-gateway.exe    (the listen-address defaults are already :8080 / :8081)
+JEV_PROXY_ADDR=:8080 JEV_ADMIN_ADDR=127.0.0.1:8081 ./jev-safety-gateway
+# PowerShell: .\jev-safety-gateway.exe    (defaults are already :8080 and 127.0.0.1:8081)
+# The admin default is loopback on purpose: the console has no protection beyond its
+# own login. Docker overrides it to :8081 (Dockerfile ENV) because the port mapping,
+# not the bind, is what keeps it private there.
 
 # admin console frontend — ONLY needed when web/src changes; web/dist is committed
 npm --prefix web install             # first time
@@ -29,17 +32,51 @@ npm --prefix web run typecheck       # vue-tsc --noEmit
 docker compose up -d --build
 ```
 
-Success prints `proxy listening on :8080` and `admin listening on :8081`.
+Success prints `proxy listening on :8080` and `admin listening on 127.0.0.1:8081`.
 
 `go build` and `go test` never need Node: `web/dist` is committed and embedded, and the `web` package tests
 assert the embedded bundle exists, its assets are present, and no external CDN/font reference sneaked in.
 When `web/src` changes, rebuild `web/dist` in the same commit so the binary and the source stay in sync.
 
+## Deployment
+
+Three supported targets, all documented in `docs/deployment.md` (install / upgrade / backup per target, plus
+the single-instance constraint and the schema-migration caveat):
+
+- **Docker / compose** — `Dockerfile`, `docker-compose.yml`. The image sets `JEV_ADMIN_ADDR=:8081`; the host
+  port mapping `127.0.0.1:8081:8081` is what keeps the console private there.
+- **Linux bare metal** — `deploy/systemd/jev-safety-gateway.service` (dedicated user, `StateDirectory`,
+  hardening), `deploy/systemd/env.example`, `deploy/linux/install.sh` (idempotent; re-running it is the
+  upgrade path; it never deletes or overwrites the DB or the config file).
+- **Windows service** — native, no nssm: `cmd/jev-safety-gateway/entry_windows.go` detects the SCM via
+  `svc.IsWindowsService()` and maps Stop/Shutdown onto the same context `server.Run` already watches, so
+  `sc.exe stop` drains in-flight requests exactly like Ctrl+C. Installed by `scripts/install-service.ps1`
+  (`sc.exe create` + failure actions + the service's registry `Environment` value); removed by
+  `scripts/uninstall-service.ps1`, which preserves the DB unless `-Purge`.
+
+`main.go` holds `serve(ctx)` — the whole program minus process-level concerns — and `main()`. `entry_windows.go`
+(`//go:build windows`) and `entry_other.go` (`//go:build !windows`) each define `runMain()`, which is the only
+platform-specific piece.
+
+**Version injection** has one source of truth: `web/package.json`'s `version` (the repo has no git tags).
+`scripts/build-local-test.ps1` reads it, and the Dockerfile derives it the same way when no `--build-arg VERSION`
+is passed — so a plain `docker compose up -d --build` reports a real version instead of `dev`. `commit` and
+`buildTime` cannot be derived in Docker (`.git` is excluded by `.dockerignore`), so CI and compose pass them as
+build args. `.github/workflows/release.yml` builds all three targets on a `v*` tag.
+
+**Logging**: `internal/logx` writes to stderr by default. `JEV_LOG_FILE` additionally writes to that file with
+size-based rotation (10 MiB, 3 backups) — the Windows service needs it because the SCM discards stderr. Linux
+uses journald and must not set it.
+
+**Single instance only.** `internal/abuse` counts strikes in process memory and `internal/config` serializes on
+one SQLite connection, so two processes on the same DB both lose ban state and contend for the file lock. No
+replicas, and no rolling upgrade with two instances online.
+
 ## Two listeners, one process
 
 The process runs two independent HTTP servers (`internal/server`):
 - **Proxy (`:8080`, public)** — the filtering reverse proxy that all client LLM traffic hits. Sits behind nginx (`nginx/gateway.conf`). Exposes `/healthz`.
-- **Admin (`:8081`, private, bind to 127.0.0.1)** — the config API under `/api/*` plus the embedded console. All `/api/*` routes except `login`/`setup`/`setup-status` require a bearer token from `POST /api/login`. The console uses history-mode routing, so non-`api/` paths that miss a real file fall back to `index.html` (`spaFileServer` in `internal/admin/handler.go`); unknown `/api/*` paths still 404.
+- **Admin (`127.0.0.1:8081`, private)** — the config API under `/api/*` plus the embedded console. The default bind is loopback (`JEV_ADMIN_ADDR`); Docker sets it to `:8081` and relies on the host port mapping instead. All `/api/*` routes except `login`/`setup`/`setup-status` require a bearer token from `POST /api/login`. The console uses history-mode routing, so non-`api/` paths that miss a real file fall back to `index.html` (`spaFileServer` in `internal/admin/handler.go`); unknown `/api/*` paths still 404.
 
 The gateway does **not** authenticate client apikeys — that remains the upstream's job. It only does content safety filtering.
 
@@ -65,6 +102,7 @@ The gateway does **not** authenticate client apikeys — that remains the upstre
   - **Extraction picks the newest client-supplied turn only** (`newestTurn` / `textFromResponses`), never the whole conversation: clients inject a large benign system prompt plus full history on every call, and concatenating it dilutes the safety signal until a harmful newest turn scores as safe. `system` / `instructions` are ignored on purpose; OpenAI role `tool`, Anthropic `tool_result` and Responses `function_call_output` **do** count, since in an agent loop the newest submission is often a tool's output (itself attacker-reachable).
 - `internal/jev` — client for `POST {base}/v1/systemone`. Sends a `noul` question; response `noul` is a 0–1 probability. **Round-robins over enabled keys** (atomic cursor) and **retries the next key on 401/429/529** (or network errors); other statuses fail immediately. `KeyProvider` is an interface implemented by a `keyAdapter` in `internal/server` — the jev package does not import config.
 - `internal/abuse` — in-memory, process-local sliding-window strike counter + temporary IP bans. Resets on restart (fine for single-instance).
+- `internal/logx` — leveled logging (`Debug` gated by `JEV_DEBUG`). `file.go` adds `JEV_LOG_FILE`: when set, output goes to that file *and* to stderr, rotating at 10 MiB with 3 backups. It uses a hand-rolled tee rather than `io.MultiWriter` because the latter stops at the first error — under the Windows SCM stderr is an invalid handle, and its write error would swallow every line before it reached the file.
 - `internal/admin` — config API + embedded UI. In-memory bearer sessions with sliding 12h expiry (`auth.go`); bcrypt admin password hash stored in the `kv` table. The audit console reads `GET /api/logs` (filters `decision` exact / `model` exact / `path` substring / `ip` prefix / `q` keyword / `since`, plus `limit`+`offset` paging) and `GET /api/logs/models` (the distinct model values with counts, for the model dropdown; scoped by `since` only, never by the other filters, or picking one model would hide every other choice).
 - `web` — the admin console frontend: a Vue 3 + Vite + TypeScript + Tailwind project. `web/src` holds the source (router, per-screen modules, components, API wrapper); `web/dist` is the committed build output embedded via `//go:embed` (`embed.go`). `go build` needs no Node — only rebuild `web/dist` (`npm --prefix web run build`) when the source changes. Offline by construction: no CDN, no bundled font files.
 

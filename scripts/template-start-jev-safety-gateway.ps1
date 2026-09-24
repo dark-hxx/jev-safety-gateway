@@ -9,13 +9,14 @@
     仓库内的入口是 scripts\start-local-test.ps1。
 
     读取同目录 .env 作为一次性初始化配置，数据库默认放在包内 data\jev-safety-gateway.db，
-    代理监听 :8080，管理控制台监听 :8081，并记录 jev-safety-gateway.pid 供停止脚本使用。
+    代理监听 :8080，管理控制台监听 127.0.0.1:8081（只绑本机），并记录 jev-safety-gateway.pid 供停止脚本使用。
 
 .PARAMETER ProxyAddr
     代理监听地址，默认 :8080（已设置 JEV_PROXY_ADDR 环境变量时不覆盖）。
 
 .PARAMETER AdminAddr
-    管理控制台监听地址，默认 :8081（已设置 JEV_ADMIN_ADDR 环境变量时不覆盖）。
+    管理控制台监听地址，默认 127.0.0.1:8081（已设置 JEV_ADMIN_ADDR 环境变量时不覆盖）。
+    绑本机是有意的：控制台除自身登录外没有别的保护，绑 0.0.0.0 就等于放到公网。
 
 .PARAMETER DbPath
     数据库路径，默认包内 data\jev-safety-gateway.db（已设置 JEV_DB_PATH 环境变量时不覆盖）。
@@ -23,7 +24,7 @@
 [CmdletBinding()]
 param(
     [string]$ProxyAddr = ':8080',
-    [string]$AdminAddr = ':8081',
+    [string]$AdminAddr = '127.0.0.1:8081',
     [string]$DbPath = ''
 )
 

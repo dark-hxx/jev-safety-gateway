@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+# 不需要 Node：web/dist 是提交进仓库的构建产物，Go 构建靠 //go:embed 直接内嵌，
+# web 包的测试会断言这份内嵌产物存在且没有外链 CDN。
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+      - name: 交叉编译检查（Linux / Windows 入口都要能编过）
+        run: |
+          set -eux
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -o /dev/null ./cmd/jev-safety-gateway
+          CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -o /dev/null ./cmd/jev-safety-gateway
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/jev-safety-gateway
+
+      - name: 检查 web/dist 与 web/src 是否同步
+        run: |
+          # 源码改了但没重新构建前端，二进制里内嵌的就是旧界面。CI 只做提醒，
+          # 因为重建 dist 需要 Node，而 go build 本身不需要。
+          if git diff --quiet HEAD -- web/src; then
+            echo "web/src 未改动，无需重建前端。"
+          else
+            echo "::warning::web/src 有改动，请确认 web/dist 已在同一提交中重新构建（npm --prefix web run build）。"
+          fi

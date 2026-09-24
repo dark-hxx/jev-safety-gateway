@@ -30,15 +30,119 @@ docker compose up -d --build
 ```
 
 - 过滤代理监听 `:8080`（nginx 转发到这里）
-- 管理控制台监听 `:8081`（默认仅绑定本机 `127.0.0.1`）
+- 管理控制台监听 `127.0.0.1:8081`（**只绑本机**）
 
-打开 `http://<主机>:8081`：首次访问会要求设置管理员口令，登录后在控制台填写：
+打开 `http://127.0.0.1:8081`：首次访问会要求设置管理员口令，登录后在控制台填写：
 
 1. **上游地址** `upstream_base_url`，例如 `http://newapi:3000`
 2. 至少添加一个 **JEV 调用密钥**（`apikey_...`）
 3. 视需要调整安全阈值 / 判定指令 / fail-open 开关
 
 之后把客户端流量指向网关（或经由 nginx，见 `nginx/gateway.conf`）即可。
+
+## 部署指南
+
+三个生产部署目标，选一个即可。分平台的完整安装、升级、备份与排错见 **[docs/deployment.md](docs/deployment.md)**；本节给出选型与最小上手步骤。
+
+| 目标 | 适用场景 | 部署产物 |
+|---|---|---|
+| **Docker / compose** | 有容器运行时，或要与 new-api 同机编排 | `Dockerfile`、`docker-compose.yml` |
+| **Linux 裸机** | 发行版带 systemd，不想引入容器 | `deploy/linux/install.sh`（幂等，可重复执行） |
+| **Windows 服务** | Windows Server，需要开机自启与进程托管 | `scripts/install-service.ps1` |
+
+### 先看两条硬约束（三个目标都一样）
+
+1. **同一份数据库只能跑一个实例。** 滥用计数在进程内存里（`internal/abuse`），配置存储串行化在单条 SQLite 连接上（`internal/config`）。起两个进程会同时丢失封禁状态并争抢数据库文件锁——没有多副本模式，也不能两个实例在线滚动升级。
+2. **升级前必须整体备份 SQLite 三件套**（`.db` / `.db-wal` / `.db-shm`）。`-wal` 可能远大于主库（实测主库 40 KB / WAL 3.4 MB），数据主要落在 WAL 里，**单独留下主库没有意义**。
+
+> 表结构迁移目前只有 `CREATE TABLE IF NOT EXISTS`：给**既有表新增列**的变更不会自动生效（启动后报 `no such column`），升级前请先读 [docs/deployment.md](docs/deployment.md) 的迁移一节。设置项本身不受影响——`load()` 在默认值之上解码存储的 JSON，新版本加的设置项在旧库上自动取默认值。
+
+### Docker / compose
+
+```bash
+cp .env.example .env      # 按需填上游地址 / 初始密钥 / 管理员口令，都可留空
+docker compose up -d --build
+```
+
+- **监听**：代理 `8080:8080`（nginx 转发到这里）；控制台容器内绑 `:8081`，宿主机映射 `127.0.0.1:8081:8081`——**是端口映射而非绑定地址**保住了它的私密性，所以镜像里必须是 `:8081`（`Dockerfile` 的 `ENV` 已设）。
+- **数据**：命名卷 `jev-safety-gateway-data` 挂到 `/data`。卷名在 compose 里写死，不含项目名前缀，因此下面的备份命令在任何目录名下都一样。
+- **日志**：容器日志已设 `max-size: 10m` / `max-file: 3` 上限（`json-file` 默认无限增长，长期运行必须设）。容器内**不要**再设 `JEV_LOG_FILE`，`docker logs` 就够。
+- **版本号**：`docker compose up -d --build` 会自动从 `web/package.json` 解析出真实版本（不会显示 `dev`）。`.git` 不在构建上下文里，提交号与构建时间拿不到，要显式传：
+
+  ```bash
+  JEV_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+  ```
+
+- **升级**：先备份卷，再 `docker compose up -d --build`。
+- **备份**：
+
+  ```bash
+  docker run --rm -v jev-safety-gateway-data:/data -v "$PWD":/backup \
+    alpine tar czf /backup/jev-safety-gateway-$(date +%F).tar.gz -C /data .
+  ```
+
+> 若 new-api 也在同一个 compose 里，用服务名互联（上游地址填 `http://newapi:3000`），无需暴露 3000 端口。nginx 若也容器化，见 `docker-compose.yml` 里的注释块——`nginx/gateway.conf` 的 upstream 要改成服务名 `jev-safety-gateway:8080`。
+
+### Linux 裸机（systemd）
+
+发布包内 `install.sh`、`jev-safety-gateway`、`jev-safety-gateway.service`、`env.example`、`deployment.md` 放在同一目录，直接跑：
+
+```bash
+sudo ./install.sh
+```
+
+- **幂等**：重复执行就是升级——停服务、换二进制、再起。它**从不删除也不覆盖**数据库与 `/etc/jev-safety-gateway/env`（升级不会重置上游地址与密钥）。
+- **路径**：
+
+  | 内容 | 位置 |
+  |---|---|
+  | 二进制 | `/usr/local/bin/jev-safety-gateway` |
+  | systemd unit | `/etc/systemd/system/jev-safety-gateway.service` |
+  | 初始化配置（含密钥） | `/etc/jev-safety-gateway/env`（`0600`） |
+  | 数据库三件套 | `/var/lib/jev-safety-gateway/` |
+
+- **服务用户**：专用系统账号 `jev-safety-gateway`（`nologin`），unit 内已加 `ProtectSystem=strict` 等加固；数据库目录由 `StateDirectory=` 交给 systemd 管理，权限自动正确。
+- **日志**：走 journald，**不要设 `JEV_LOG_FILE`**（那是给 Windows 服务的）。
+- **常用命令**：
+
+  ```bash
+  systemctl status jev-safety-gateway
+  journalctl -u jev-safety-gateway -f
+  systemctl restart jev-safety-gateway
+  ```
+
+- **升级**：把新二进制覆盖到同目录后重跑 `sudo ./install.sh`。
+- **备份**：
+
+  ```bash
+  sudo tar czf ~/jev-safety-gateway-$(date +%F).tar.gz \
+    /var/lib/jev-safety-gateway /etc/jev-safety-gateway
+  ```
+
+- **卸载**：`sudo ./install.sh --uninstall`。库与配置**有意保留**，脚本末尾会打印它们的路径与手工清理命令。
+
+### Windows 服务（原生）
+
+无需 nssm：`cmd/jev-safety-gateway/entry_windows.go` 用 `golang.org/x/sys/windows/svc` 检测 SCM，并把 Stop/Shutdown 映射到 `server.Run` 已经在等的那个 context，所以 `sc.exe stop` 与 Ctrl+C 走**同一条关闭路径**，在途请求会被排空。
+
+以**管理员**身份：
+
+```powershell
+.\scripts\install-service.ps1 -ExePath .\out\jev-safety-gateway\jev-safety-gateway.exe
+```
+
+- **安装目录**：默认 `%ProgramData%\jev-safety-gateway`，二进制、`data\`、`logs\` 都在这里（和仓库里的 `data\` 是两回事，脚本从不删除数据目录）。
+- **环境变量**：Windows 服务没有 shell，变量写在服务注册表 `Environment`（`REG_MULTI_SZ`）。脚本**只放基础设施变量**（`JEV_DB_PATH` / `JEV_LOG_FILE` / `JEV_PROXY_ADDR` / `JEV_ADMIN_ADDR`）。
+  **密钥与管理员口令请留在控制台里配置**——注册表对管理员与 SYSTEM 可读，`-EnvFile` 会把初始密钥写进去，生产环境不推荐。
+- **日志**：`JEV_LOG_FILE` 已自动指向 `logs\gateway.log`，**必须设**——SCM 不给服务控制台，stderr 会被丢弃，不设等于没有日志。
+- **崩溃自启**：已配置 `sc.exe failure` 动作 `restart/5000` ×3、计数每天重置。
+- **升级**：停服务 → 替换 exe → 起服务（重跑 `install-service.ps1` 亦可，它会停服务再换文件）。
+- **卸载**：`.\scripts\uninstall-service.ps1`，保留 `data\` 与 `logs\`。加 `-Purge` 才会删，且需手工输入 `DELETE` 确认，并会先自动备份。
+
+### 反向代理与远程访问
+
+- **nginx**：`nginx/gateway.conf` 是现成示例，upstream 默认 `127.0.0.1:8080`（裸机口径），容器部署改成服务名。它已透传 `X-Forwarded-For` / `X-Real-IP`——**滥用防护按来源 IP 计数，少透传这一项会让所有客户端共用一个计数**。
+- **控制台远程访问**：默认只绑本机。远程请走 SSH 隧道 `ssh -L 8081:127.0.0.1:8081 <user>@<host>`，或在 nginx 层叠加 IP 白名单 / TLS / basic auth。**不要改绑 `0.0.0.0`**。
 
 ## 配置项说明
 
@@ -107,7 +211,8 @@ docker compose up -d --build
 |---|---|
 | `JEV_DB_PATH` | SQLite 路径（默认 `./data/jev-safety-gateway.db`，相对启动时的工作目录；Docker 镜像内由 `ENV` 固定为 `/data/jev-safety-gateway.db`） |
 | `JEV_PROXY_ADDR` | 代理监听地址（默认 `:8080`） |
-| `JEV_ADMIN_ADDR` | 控制台监听地址（默认 `:8081`） |
+| `JEV_ADMIN_ADDR` | 控制台监听地址（默认 `127.0.0.1:8081`，只绑本机；Docker 镜像内由 `ENV` 设为 `:8081`，靠端口映射保持私密） |
+| `JEV_LOG_FILE` | 把日志同时写入该文件并按 10 MiB 轮转、保留 3 份。Windows 服务用（SCM 不提供控制台，stderr 会被丢弃）；Linux 走 journald，不要设 |
 | `JEV_UPSTREAM_URL` | 初始上游地址 |
 | `JEV_BASE_URL` | 初始 JEV 接口地址 |
 | `JEV_API_KEY` | 初始 JEV 密钥（之后可在控制台增删多个） |
@@ -164,7 +269,7 @@ go build -trimpath -ldflags "-s -w -X main.version=$ver -X main.commit=$sha -X m
 
 ```
 proxy listening on :8080
-admin listening on :8081
+admin listening on 127.0.0.1:8081
 ```
 
 ### 3. 打开控制台配置
@@ -257,7 +362,7 @@ curl -i http://localhost:8080/post \
 | `-NoRestart` | 包内已有网关在运行时不再自动停止，直接报错退出 |
 | `-Clean` | 构建前清空测试包目录（包内 `.env` 与 `data\` 一并删除；仓库根目录的 `data\` 不受影响） |
 | `-SkipFrontend` / `-Offline` / `-NoZip` | 透传给 `build-local-test.ps1` |
-| `-ProxyAddr` / `-AdminAddr` | 覆盖监听地址，默认 `:8080` / `:8081` |
+| `-ProxyAddr` / `-AdminAddr` | 覆盖监听地址，默认 `:8080` / `127.0.0.1:8081` |
 
 ### 只打包
 
@@ -295,24 +400,29 @@ out\jev-safety-gateway-<日期>-<短提交>.zip
 ## 项目结构
 
 ```
-cmd/jev-safety-gateway/    入口、环境变量初始化
+cmd/jev-safety-gateway/    入口、环境变量初始化；Windows 服务入口（entry_windows.go）
 internal/config/           SQLite 存储：设置、密钥、日志、统计
 internal/extract/          按 API 路径提取用户输入
 internal/jev/              JEV 评估客户端（多密钥轮询 + 重试）
 internal/proxy/            过滤反向代理（判定 → 放行/拦截）
+internal/logx/             日志（JEV_LOG_FILE 文件输出 + 按大小轮转）
 internal/admin/            管理 API + 口令鉴权
-internal/server/           两个监听器装配（代理 :8080 / 控制台 :8081）
+internal/server/           两个监听器装配（代理 :8080 / 控制台 127.0.0.1:8081）
 web/                       管理控制台前端工程（Vue 3 + Vite + TS + Tailwind）
   src/                       源码（路由、模块、组件、接口封装）
   dist/                      构建产物，随源码入库并经 //go:embed 内嵌
 nginx/gateway.conf         nginx 反代示例
-scripts/                   Windows 本地 test 打包与启动（见「本地 test 打包与启动」）
+scripts/                   Windows 本地 test 打包与启动、Windows 服务安装/卸载
+deploy/                    Linux 部署产物（systemd unit、install.sh、env.example）
+.github/workflows/         CI 与发布（打 tag 出全平台包 + 推 ghcr 镜像）
+docs/deployment.md         部署指南（三平台安装/升级/备份、单实例约束、迁移注意）
 Dockerfile, docker-compose.yml
 ```
 
 ## 安全提示
 
-- 管理控制台（`:8081`）默认仅绑定本机。生产环境请置于内网，或在 nginx 层叠加 IP 白名单 / TLS / basic auth。
+- 管理控制台（`127.0.0.1:8081`）默认只绑本机。生产环境请置于内网，或在 nginx 层叠加 IP 白名单 / TLS / basic auth。
+  远程访问请用 SSH 隧道（`ssh -L 8081:127.0.0.1:8081 <user>@<host>`），**不要**改绑 `0.0.0.0`——控制台除自身登录外没有别的保护。
 - 网关本身不校验客户端 apikey；对客户端的鉴权仍由上游（new-api 等）负责。网关只做内容安全过滤。
 - JEV 密钥、管理员口令哈希保存在 SQLite（Docker volume `jev-safety-gateway-data`），请妥善保管该卷。
 - **`GET /api/version` 是唯一免鉴权的 `/api/` 路由**：登录页需要在拿到 token 之前显示版本号与守护进程地址。

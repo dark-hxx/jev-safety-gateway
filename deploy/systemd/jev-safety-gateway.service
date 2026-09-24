@@ -1,0 +1,47 @@
+[Unit]
+Description=JEV Safety Gateway (LLM API 内容安全过滤反向代理)
+Documentation=file:/usr/local/share/doc/jev-safety-gateway/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jev-safety-gateway
+Group=jev-safety-gateway
+ExecStart=/usr/local/bin/jev-safety-gateway
+
+# 一次性初始化值（上游地址、初始 JEV 密钥、初始管理员口令）放这里。
+# 已在数据库里的值不会被覆盖，之后请在控制台修改。
+# 前缀的 '-' 表示文件缺失时不算失败——首次安装尚未填配置时仍能启动。
+EnvironmentFile=-/etc/jev-safety-gateway/env
+
+# 监听地址显式写死，便于审计这个 unit 到底暴露了什么。
+# 控制台只绑本机：它除自身登录外没有别的保护，绑 0.0.0.0 就等于放到公网。
+Environment=JEV_PROXY_ADDR=:8080
+Environment=JEV_ADMIN_ADDR=127.0.0.1:8081
+
+# StateDirectory 让 systemd 建好 /var/lib/jev-safety-gateway 并交给服务用户，
+# 同时在 ProtectSystem=strict 下自动把该目录列入可写集合。%S 展开为 /var/lib。
+# 注意 data 目录下是 SQLite 三件套（.db / -wal / -shm），备份必须整体做。
+StateDirectory=jev-safety-gateway
+Environment=JEV_DB_PATH=%S/jev-safety-gateway/jev-safety-gateway.db
+
+# 网关进程本身不重启也不该退出；退出即视为异常。
+Restart=always
+RestartSec=2
+
+# 加固：进程只读文件系统、无提权、无家目录。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# 日志走 journald：journalctl -u jev-safety-gateway -f
+# 不要设 JEV_LOG_FILE，那会让应用自己写文件并轮转，与 journald 重复。
+
+[Install]
+WantedBy=multi-user.target

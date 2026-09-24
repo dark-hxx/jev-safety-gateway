@@ -1,6 +1,15 @@
 services:
   jev-safety-gateway:
-    build: .
+    build:
+      context: .
+      # VERSION 留空时由 Dockerfile 从 web/package.json 自行解析，所以默认的
+      # `docker compose up -d --build` 也会报出真实版本号而不是 "dev"。
+      # .git 不在构建上下文里，COMMIT/BUILD_TIME 拿不到，只能这样传进来：
+      #   JEV_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+      args:
+        VERSION: "${JEV_VERSION:-}"
+        COMMIT: "${JEV_COMMIT:-}"
+        BUILD_TIME: "${JEV_BUILD_TIME:-}"
     image: jev-safety-gateway:latest
     container_name: jev-safety-gateway
     restart: unless-stopped
@@ -15,11 +24,19 @@ services:
       JEV_ADMIN_PASSWORD: "${JEV_ADMIN_PASSWORD:-}"  # 初始管理员口令 (可选)
     volumes:
       - jev-safety-gateway-data:/data
+    # 容器日志默认无限增长，长期运行必须设上限。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # 若 newapi 也在本 compose 中, 可用 depends_on 并以服务名互联:
     # depends_on:
     #   - newapi
 
   # 示例: 将 nginx 作为最前端入口 (可选, 按需启用)
+  # 注意 nginx/gateway.conf 的 upstream 默认写的是 127.0.0.1:8080（裸机口径），
+  # 在容器里要改成服务名 jev-safety-gateway:8080 才能解析。
   # nginx:
   #   image: nginx:alpine
   #   ports:
@@ -31,3 +48,6 @@ services:
 
 volumes:
   jev-safety-gateway-data:
+    # 显式命名，否则 compose 会加项目名前缀（如 jev_jev-safety-gateway-data），
+    # 备份命令就得跟着目录名变。写死之后备份/恢复命令在任何机器上都一样。
+    name: jev-safety-gateway-data

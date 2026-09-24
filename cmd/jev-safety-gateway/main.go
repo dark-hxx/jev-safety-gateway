@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -19,12 +20,36 @@ import (
 )
 
 func main() {
-	// The default is relative to the working directory so a local run lands in
+	// Before anything else: when the Windows SCM starts this process there is no
+	// console and stderr is discarded, so JEV_LOG_FILE is the only record of
+	// what it says. The installer sets it; on Linux and in Docker the log goes
+	// to journald or the container runtime and the variable stays unset.
+	if _, err := logx.InitFile(os.Getenv("JEV_LOG_FILE")); err != nil {
+		log.Fatalf("open log file: %v", err)
+	}
+
+	if err := runMain(); err != nil {
+		log.Fatalf("server: %v", err)
+	}
+	log.Println("shutdown complete")
+}
+
+// serve opens the store, wires the two listeners and blocks until ctx is
+// cancelled. It is the whole program minus process-level concerns (signal
+// handling, service control), which is what lets the Windows service path in
+// entry_windows.go reuse it unchanged.
+func serve(ctx context.Context) error {
+	// The DB default is relative to the working directory so a local run lands in
 	// <cwd>/data/ and needs no override. Docker pins the absolute /data path via
-	// ENV (see Dockerfile), where the compose volume is mounted.
+	// ENV (see Dockerfile); the systemd unit and the Windows service installer
+	// each set an absolute path of their own.
 	dbPath := env("JEV_DB_PATH", "./data/jev-safety-gateway.db")
 	proxyAddr := env("JEV_PROXY_ADDR", ":8080")
-	adminAddr := env("JEV_ADMIN_ADDR", ":8081")
+	// Loopback by default: the console has no protection beyond its own login,
+	// and a bare-metal install that binds every interface puts it on the public
+	// internet. Docker overrides this to :8081 (see Dockerfile) because the port
+	// mapping, not the bind, is what keeps it private there.
+	adminAddr := env("JEV_ADMIN_ADDR", "127.0.0.1:8081")
 
 	// Verbose per-request tracing for development.
 	logx.Debug = truthy(os.Getenv("JEV_DEBUG"))
@@ -34,7 +59,7 @@ func main() {
 
 	store, err := config.Open(dbPath)
 	if err != nil {
-		log.Fatalf("open store: %v", err)
+		return fmt.Errorf("open store: %w", err)
 	}
 	defer store.Close()
 
@@ -46,13 +71,13 @@ func main() {
 	info := buildInfo()
 	srv := server.New(store, web.FS(), proxyAddr, adminAddr, &info)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	return srv.Run(ctx)
+}
 
-	if err := srv.Run(ctx); err != nil {
-		log.Fatalf("server: %v", err)
-	}
-	log.Println("shutdown complete")
+// consoleContext is the foreground-process cancellation source: Ctrl+C or, on
+// Linux, SIGTERM from systemd.
+func consoleContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 }
 
 // bootstrap applies optional first-run configuration from environment variables:

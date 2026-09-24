@@ -4,10 +4,10 @@ WORKDIR /src
 RUN apk add --no-cache git
 
 # Build identity reported by GET /api/version. .git is not in the build context
-# (see .dockerignore), so the linker flags are the only source of this in the
-# image — pass them from CI/compose:
-#   docker build --build-arg VERSION=$(git describe --tags --always) ...
-ARG VERSION=dev
+# (see .dockerignore), so no VCS stamp is available and COMMIT/BUILD_TIME are
+# only ever what the caller passes:
+#   docker build --build-arg COMMIT=$(git rev-parse --short HEAD) ...
+ARG VERSION=
 ARG COMMIT=
 ARG BUILD_TIME=
 
@@ -15,9 +15,22 @@ ARG BUILD_TIME=
 # not need to be committed. (Pure Go, no CGO thanks to modernc.org/sqlite.)
 COPY . .
 RUN go mod tidy
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
-    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
-    -o /out/jev-safety-gateway ./cmd/jev-safety-gateway
+
+# VERSION is different from the other two: web/package.json is in the context
+# and is the same source scripts/build-local-test.ps1 reads, so the image
+# derives it itself when no build-arg is given. Without this a plain
+# `docker compose up -d --build` reported "dev" while a local Windows build of
+# the identical commit reported a real version.
+RUN set -eux; \
+    ver="${VERSION}"; \
+    if [ -z "$ver" ]; then \
+        ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' web/package.json | head -n 1)"; \
+    fi; \
+    [ -n "$ver" ] || ver=dev; \
+    echo "building version=$ver commit=${COMMIT}"; \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath \
+        -ldflags="-s -w -X main.version=$ver -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
+        -o /out/jev-safety-gateway ./cmd/jev-safety-gateway
 
 # ---- runtime stage ----
 FROM alpine:3.20
