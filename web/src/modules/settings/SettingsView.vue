@@ -352,6 +352,17 @@ const blockRule = computed(() =>
         </label>
 
         <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
+          <input v-model="form.expand_base64" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary" />
+          <span class="flex flex-col gap-0.5">
+            <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+              {{ t('settings.base64') }}
+              <HintTip :text="t('settings.base64Tip')" />
+            </span>
+            <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.base64Hint') }}</span>
+          </span>
+        </label>
+
+        <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
           <input v-model="form.record_snippet" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary" />
           <span class="flex flex-col gap-0.5">
             <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">

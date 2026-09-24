@@ -226,9 +226,16 @@ func (h *Handler) decide(r *http.Request, set config.Settings, body *requestBody
 		return "skip", "non-json", "", nil, "uninspectable content-type", ""
 	}
 
-	res := extract.Extract(r.URL.Path, r.Header.Get("Content-Type"), body.prefix)
+	res := extract.Extract(r.URL.Path, r.Header.Get("Content-Type"), body.prefix, set.ExpandBase64)
 	if !res.Checkable || strings.TrimSpace(res.Text) == "" {
-		return "skip", res.Kind, res.Model, nil, "no extractable input", ""
+		reason := "no extractable input"
+		if res.Stripped {
+			// The turn held nothing but client-injected context. Worth saying
+			// so explicitly: it is also what hiding a payload in a
+			// <system-reminder> block looks like from here.
+			reason = "no extractable input, client-injected context only"
+		}
+		return "skip", res.Kind, res.Model, nil, reason, ""
 	}
 
 	stateText := extract.Clamp(res.Text, set.MaxStateChars)

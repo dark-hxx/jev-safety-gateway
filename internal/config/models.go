@@ -47,6 +47,13 @@ type Settings struct {
 	// any endpoint whose legitimate payloads exceed the inspection limit.
 	RejectOversizeBody bool `json:"reject_oversize_body"`
 
+	// ExpandBase64 decodes base64 runs inside the extracted text before it is
+	// sent to JEV (see internal/extract.ExpandBase64), so the same content scores
+	// the same however it was encoded. On by default: without it the identical
+	// prompt scored 0.15 written out and 0.80 base64-encoded, which made encoding
+	// it a free bypass. Off sends the text to JEV exactly as the client wrote it.
+	ExpandBase64 bool `json:"expand_base64"`
+
 	// --- Per-IP abuse detection ---
 
 	// AbuseEnabled turns on temporary IP bans for repeated harmful requests.
@@ -109,7 +116,8 @@ func DefaultSettings() Settings {
 		CheckResponse:     false,
 
 		RejectOversizeBody: false,
-		BlockMessage:      "请求内容被安全网关拦截 (blocked by JEV safety gateway).",
+		ExpandBase64:       true,
+		BlockMessage:       "请求内容被安全网关拦截 (blocked by JEV safety gateway).",
 		MaxStateChars:     16000,
 		JEVTimeoutMS:      8000,
 		AbuseEnabled:      true,

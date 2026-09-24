@@ -5,6 +5,10 @@
 // threads, rerank) plus Anthropic's /v1/messages and Gemini's generateContent,
 // and falls back to a generic string collector for anything unrecognized, so no
 // endpoint is ever forwarded completely unchecked.
+//
+// What it returns is the user's own input: client-injected context is dropped
+// (StripInjected) and base64 payloads are decoded in place (ExpandBase64), so
+// JEV scores the content the caller submitted whichever way it was encoded.
 package extract
 
 import (
@@ -23,6 +27,12 @@ type Result struct {
 	Checkable bool   // false => skip the JEV check (unknown/binary/empty)
 	Kind      string // short label for logging
 	Model     string // model name from the body, if present, for logging
+	// Stripped reports that the submission came out empty once client-injected
+	// context was removed, i.e. the turn carried nothing but the client's own
+	// context. It lets the audit trail distinguish "nothing to check" from "the
+	// client sent only boilerplate", which is also what a deliberate attempt to
+	// hide a payload inside a <system-reminder> block looks like.
+	Stripped bool
 }
 
 // endpoint describes how one API endpoint carries user input.
@@ -87,16 +97,15 @@ var endpoints = []endpoint{
 var genericEndpoint = endpoint{kind: "generic", extract: genericText}
 
 // Extract picks the user-input text from body based on the request path and
-// content type.
-func Extract(path, contentType string, body []byte) Result {
+// content type. expandBase64 turns on the base64 pass of finish (see
+// ExpandBase64); it is a parameter rather than a constant because the operator
+// can switch it off from the console.
+func Extract(path, contentType string, body []byte, expandBase64 bool) Result {
 	// Form bodies are not JSON, so they are matched by content type before the
 	// path table: audio transcriptions, image edits and file uploads all carry
 	// their prompt in a form field.
 	if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
-		r := extractForm(contentType, body)
-		r.Text = strings.TrimSpace(r.Text)
-		r.Checkable = r.Text != ""
-		return r
+		return finish(extractForm(contentType, body), expandBase64)
 	}
 
 	ep := lookup(strings.ToLower(path))
@@ -110,12 +119,27 @@ func Extract(path, contentType string, body []byte) Result {
 	if ep.noText {
 		r.Text, r.Checkable = "", false
 	} else {
-		r.Text = strings.TrimSpace(r.Text)
-		r.Checkable = r.Text != ""
+		r = finish(r, expandBase64)
 	}
 	if r.Model == "" {
 		r.Model = peekModel(body)
 	}
+	return r
+}
+
+// finish applies the submission-time passes and derives Checkable.
+//
+// Order matters: client-injected context is dropped first, so a payload parked
+// inside a <system-reminder> block is dropped with the block instead of being
+// decoded and scored.
+func finish(r Result, expandBase64 bool) Result {
+	raw := strings.TrimSpace(r.Text)
+	r.Text = StripInjected(raw)
+	if expandBase64 {
+		r.Text = ExpandBase64(r.Text)
+	}
+	r.Stripped = raw != "" && r.Text == ""
+	r.Checkable = r.Text != ""
 	return r
 }
 

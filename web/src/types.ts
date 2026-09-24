@@ -15,6 +15,8 @@ export interface Settings {
   fail_open: boolean
   check_response: boolean
   reject_oversize_body: boolean
+  /** 是否先解码送检文本中的 base64 片段；默认开启，关闭时按原样送检。 */
+  expand_base64: boolean
   abuse_enabled: boolean
   abuse_window_sec: number
   abuse_max_harmful: number

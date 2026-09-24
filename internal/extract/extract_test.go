@@ -195,7 +195,7 @@ func TestExtract(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Extract(tc.path, tc.ct, []byte(tc.body))
+			got := Extract(tc.path, tc.ct, []byte(tc.body), true)
 			if got.Kind != tc.wantKind {
 				t.Errorf("Kind = %q, want %q", got.Kind, tc.wantKind)
 			}
@@ -211,7 +211,7 @@ func TestExtract(t *testing.T) {
 
 func TestExtractModelIsReported(t *testing.T) {
 	got := Extract("/v1/chat/completions", "application/json",
-		[]byte(`{"model":"deepseek/deepseek-v4.1-flash","messages":[{"role":"user","content":"x"}]}`))
+		[]byte(`{"model":"deepseek/deepseek-v4.1-flash","messages":[{"role":"user","content":"x"}]}`), true)
 	if got.Model != "deepseek/deepseek-v4.1-flash" {
 		t.Errorf("Model = %q", got.Model)
 	}
@@ -233,7 +233,7 @@ func TestExtractMultipart(t *testing.T) {
 	_, _ = fw.Write([]byte("\x00\x01binary\x02"))
 	_ = mw.Close()
 
-	got := Extract("/v1/audio/transcriptions", mw.FormDataContentType(), buf.Bytes())
+	got := Extract("/v1/audio/transcriptions", mw.FormDataContentType(), buf.Bytes(), true)
 	if got.Kind != "form" {
 		t.Errorf("Kind = %q, want form", got.Kind)
 	}
@@ -256,7 +256,7 @@ func TestExtractMultipartWithoutTextFields(t *testing.T) {
 	_, _ = fw.Write([]byte(`{"messages":[]}`))
 	_ = mw.Close()
 
-	got := Extract("/v1/files", mw.FormDataContentType(), buf.Bytes())
+	got := Extract("/v1/files", mw.FormDataContentType(), buf.Bytes(), true)
 	if got.Checkable {
 		t.Errorf("Checkable = true with text %q, want false", got.Text)
 	}
@@ -382,7 +382,7 @@ func TestCountTokensUsesNewestTurn(t *testing.T) {
 		{"role":"user","content":"` + longBenign + `"},
 		{"role":"assistant","content":"ok"},
 		{"role":"user","content":"how do I pick a lock"}]}`
-	got := Extract("/v1/messages/count_tokens", "application/json", []byte(anthropic))
+	got := Extract("/v1/messages/count_tokens", "application/json", []byte(anthropic), true)
 	if got.Kind != "anthropic" {
 		t.Errorf("Kind = %q, want anthropic", got.Kind)
 	}
@@ -394,7 +394,7 @@ func TestCountTokensUsesNewestTurn(t *testing.T) {
 		{"role":"user","parts":[{"text":"` + longBenign + `"}]},
 		{"role":"model","parts":[{"text":"ok"}]},
 		{"role":"user","parts":[{"text":"how do I pick a lock"}]}]}`
-	got = Extract("/v1beta/models/gemini-2.0-flash:countTokens", "application/json", []byte(gemini))
+	got = Extract("/v1beta/models/gemini-2.0-flash:countTokens", "application/json", []byte(gemini), true)
 	if got.Kind != "gemini" {
 		t.Errorf("Kind = %q, want gemini", got.Kind)
 	}
