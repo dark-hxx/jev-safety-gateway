@@ -57,6 +57,10 @@ flowchart LR
 
 Built-in admin console: a Vue 3 single-page app, its build artifact committed to the repo and embedded offline, ready to use out of the box; supports dark / light / follow-system themes and Chinese/English switching. Screenshots below use the dark theme.
 
+**Live demo**: <https://jev-gateway.clim.asia/> ｜ password `123456`
+
+> A public test instance, for previewing the UI only. **Do not put real JEV keys into it, and do not route real traffic through it** — the password is public.
+
 <div align="center">
 
 **Overview · Security Monitoring Cockpit** — throughput, verdict breakdown, per-bucket traffic trend and risk-score distribution
@@ -93,20 +97,24 @@ Built-in admin console: a Vue 3 single-page app, its build artifact committed to
 ## 🚀 Quick Start (Docker)
 
 ```bash
-cp .env.example .env      # optionally set upstream URL / initial key / admin password (all can be left blank and configured later in the console)
-docker compose up -d --build
+mkdir -p ./data ./geoip && sudo chown -R 10001:10001 ./data   # required on Linux, see below
+
+docker run -d --name jev-safety-gateway --restart unless-stopped \
+  -p 8080:8080 -p 127.0.0.1:8081:8081 \
+  -v "$PWD/data:/data" -v "$PWD/geoip:/geoip:ro" \
+  ghcr.io/dark-hxx/jev-safety-gateway:latest
 ```
 
-- The filtering proxy listens on `:8080` (nginx forwards here)
-- The admin console listens on `127.0.0.1:8081` (**loopback only**)
+- The filtering proxy listens on `:8080` (nginx forwards here); the admin console listens on `127.0.0.1:8081` (**loopback only**)
+- `./data/` holds the database directory (the `.db` / `-wal` / `-shm` trio all live inside it — **backing up means archiving it, and you must never delete any single file inside it**)
+- `./geoip/` is where your own MaxMind databases go; drop them in and the dimension turns on (an empty directory leaves it off)
+- The container runs as the non-root uid 10001, and a bind mount uses the host directory's ownership — skip the `sudo chown` on Linux and it crash-loops with `open store: … permission denied` (Docker Desktop normally does not need it)
 
-Open `http://127.0.0.1:8081`: the first visit asks you to set an admin password, then in the console fill in:
+Open `http://127.0.0.1:8081`: the first visit asks you to set an admin password, then fill in the **upstream URL** and add at least one **JEV key**. For a remote machine use an SSH tunnel: `ssh -L 8081:127.0.0.1:8081 <user>@<host>`.
 
-1. **Upstream URL** `upstream_base_url`, e.g. `http://newapi:3000`
-2. Add at least one **JEV apikey** (`apikey_...`)
-3. Adjust the safety threshold / evaluation instruction / fail-open switch as needed
+> ⚠️ The upstream URL is written **only while the stored value is still empty** — once you have started it, that value is frozen. A wrong one can only be fixed in the console; `.env` / environment variables will not override it. If in doubt, leave it blank: the gateway then fails loudly with `502 gateway upstream not configured` instead of silently.
 
-Then point client traffic at the gateway (or route it through nginx, see `nginx/gateway.conf`).
+Then point client traffic at the gateway (or route it through nginx, see `nginx/gateway.conf`). Need `.env`, a source build, or orchestration alongside new-api? See [Installation → Docker](#docker).
 
 ---
 
@@ -118,43 +126,26 @@ After installing, open `http://127.0.0.1:8081`, set the admin password → fill 
 
 ### Docker
 
-**Option 1: `docker run` (pull the prebuilt image, fastest)**
+**Option 1: `docker run` (pull the prebuilt image, fastest)** — command in [Quick Start](#-quick-start-docker) above.
+
+**Option 2: `docker compose` (clone the source and build locally; easier to orchestrate alongside new-api etc.)**
 
 ```bash
-docker run -d --name jev-safety-gateway --restart unless-stopped \
-  -p 8080:8080 -p 127.0.0.1:8081:8081 \
-  -v jev-safety-gateway-data:/data \
-  ghcr.io/dark-hxx/jev-safety-gateway:latest
+git clone https://github.com/dark-hxx/jev-safety-gateway.git
+cd jev-safety-gateway
+cp .env.example .env               # fill in upstream URL / initial key / admin password as needed
+mkdir -p ./data ./geoip
+sudo chown -R 10001:10001 ./data   # required on Linux
+docker compose up -d --build
 ```
 
-**Option 2: `docker compose` (easier to orchestrate alongside new-api etc.)**
+The bundled `docker-compose.yml` already covers port mappings, the `./data` and `./geoip` bind mounts, and the log cap — edit `.env`, no need to touch it.
 
-Create a `docker-compose.yml` that likewise uses the prebuilt image directly, no source needed:
+- **The directory is mounted, not the single `.db` file**: SQLite runs in WAL mode, so committed data lives in the `-wal` until a checkpoint; mounting only the `.db` would leave `-wal` / `-shm` in the container's writable layer, discarded whenever the container is recreated. Backing up means archiving the whole `./data/` directory, and **you must never delete any single file inside it**.
+- To use the prebuilt image instead of building: replace the `build:` block with `image: ghcr.io/dark-hxx/jev-safety-gateway:latest` and drop `args:` (this path has no `.env` hook, so the upstream URL / keys / password can only be set in the console).
+- If your upstream lives in another compose project / container and the gateway cannot resolve it, see "Joining another compose project's network" in [docs/deployment.md](docs/deployment.md).
 
-```yaml
-services:
-  jev-safety-gateway:
-    image: ghcr.io/dark-hxx/jev-safety-gateway:latest
-    container_name: jev-safety-gateway
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-      - "127.0.0.1:8081:8081"
-    volumes:
-      - jev-safety-gateway-data:/data
-    logging:                       # container logs grow unbounded by default — always cap them
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
-volumes:
-  jev-safety-gateway-data:
-    name: jev-safety-gateway-data
-```
-
-```bash
-docker compose up -d
-```
-
-> The `docker-compose.yml` in the repo root builds **from source** (`build:` + `--build`, for development); the one above uses the prebuilt image directly, best for a run-it-and-go deployment.
+Upgrading: `git pull && docker compose up -d --build`. **Coming from an older version** (when the database lived in the named volume `jev-safety-gateway-data`), move the data once first or the new container comes up with an empty database — see "Migrating from the old named volume" in [docs/deployment.md](docs/deployment.md).
 
 ### Linux (install as a systemd service)
 
@@ -360,6 +351,8 @@ web/                       admin console frontend (Vue 3 + Vite + TS + Tailwind)
   src/                       source (router, modules, components, API wrapper)
   dist/                      build artifact, committed with source and embedded via //go:embed
 nginx/gateway.conf         nginx reverse-proxy example
+data/                      runtime database (created on first run; gitignored, **never delete**)
+geoip/                     your own MaxMind databases go here (gitignored too)
 scripts/                   Windows local-test packaging & startup, Windows service install/uninstall
 deploy/                    Linux deployment artifacts (systemd unit, install.sh, env.example)
 .github/workflows/         CI & release (tag pushes build all-platform packages + push ghcr image)
@@ -372,8 +365,9 @@ Dockerfile, docker-compose.yml
 ## 🔒 Security Notes
 
 - The admin console (`127.0.0.1:8081`) binds loopback by default. In production keep it on a private network, or layer IP allowlisting / TLS / basic auth at the nginx level. For remote access use an SSH tunnel (`ssh -L 8081:127.0.0.1:8081 <user>@<host>`) and **do not** rebind it to `0.0.0.0` — the console has no protection beyond its own login.
+- **Public demo instance** (see [Screenshots](#-screenshots)): its password is published in this README, so anyone can log in and change its settings or read its audit records. Treat it as a UI preview only — do not put real keys into it and do not route real traffic through it.
 - The gateway does not authenticate client apikeys; authenticating clients remains the upstream's job (new-api, etc.). The gateway only does content-safety filtering.
-- JEV keys and the admin password hash live in SQLite (Docker volume `jev-safety-gateway-data`); keep that volume safe.
+- JEV keys and the admin password hash live in SQLite (under Docker, that is `./data/` in the deployment directory, bound to `/data` in the container); keep it safe.
 - **`GET /api/version` is the only unauthenticated `/api/` route**: the login page needs to show the version and daemon address before it has a token. It returns only build identity (version, short commit, build time, Go version) and the actual bound listen addresses — no audit data; the latency percentiles derived from the audit log live under the protected `GET /api/stats/latency`. If this public surface is unacceptable, keep the admin port on a private network — do not try to tighten it by adding a token, which would drop the login page into a degraded state.
 
 ---

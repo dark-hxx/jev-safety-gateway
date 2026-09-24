@@ -11,7 +11,7 @@
 |---|---|---|---|
 | 适用 | 首选，升级最省事 | 已有 Linux 主机、不想引入 Docker | Windows 主机 |
 | 安装 | `docker compose up -d --build` | `sudo ./install.sh` | `.\scripts\install-service.ps1` |
-| 数据位置 | 具名卷 `jev-safety-gateway-data` | `/var/lib/jev-safety-gateway/` | `%ProgramData%\jev-safety-gateway\data\` |
+| 数据位置 | 部署目录下的 `./data/` | `/var/lib/jev-safety-gateway/` | `%ProgramData%\jev-safety-gateway\data\` |
 | 日志 | `docker compose logs` | `journalctl -u jev-safety-gateway` | `%ProgramData%\jev-safety-gateway\logs\gateway.log` |
 | 开机自启 | `restart: unless-stopped` | systemd `enable` | SCM `start= auto` |
 | 崩溃重启 | 同上 | `Restart=always` | SCM failure actions |
@@ -69,7 +69,7 @@
 | 场景 | 数据库 | 说明 |
 |---|---|---|
 | 开发机直接跑 | 仓库根 `data/` | 相对启动时的工作目录。**不受版本控制，删了无法找回** |
-| Docker | 具名卷 `jev-safety-gateway-data` | 挂到容器内 `/data` |
+| Docker | 部署目录下的 `./data/` | compose 把它绑定挂载到容器内 `/data`（旧版用具名卷，见下方迁移） |
 | Linux 裸机 | `/var/lib/jev-safety-gateway/` | systemd `StateDirectory` 管理 |
 | Windows 服务 | `%ProgramData%\jev-safety-gateway\data\` | 安装脚本创建 |
 
@@ -86,12 +86,24 @@
 ### 安装
 
 ```bash
-cp .env.example .env      # 按需填写；全部可留空，之后在控制台配置
+git clone https://github.com/dark-hxx/jev-safety-gateway.git
+cd jev-safety-gateway
+cp .env.example .env               # 按需填写；全部可留空，之后在控制台配置
+mkdir -p ./data ./geoip
+sudo chown -R 10001:10001 ./data   # Linux 必需，见下
 docker compose up -d --build
 ```
 
 - 代理监听 `:8080`（给 nginx 或客户端）
 - 控制台映射到宿主机 `127.0.0.1:8081`，**只在本机可访问**
+- 数据库落在部署目录的 `./data/`（绑定挂载到容器 `/data`）——宿主上直接可见，备份就是打包这个目录
+- GeoIP 库放在部署目录的 `./geoip/`（只读挂载到容器 `/geoip`），把两个 `.mmdb` 放进去即生效
+
+> **为什么必须 `chown`**：镜像以非 root 的 `app`（uid/gid 10001）运行。具名卷会由镜像里
+> `/data` 的属主初始化，而**绑定挂载不会**——它直接用宿主目录的属主，root 或你自己的 uid
+> 都不是 10001，于是进程建不了库文件，容器反复重启，日志里是
+> `open store: … permission denied`。Docker Desktop（Windows / macOS）一般不受影响。
+> 只读的 `./geoip` 不用改属主。
 
 镜像里的版本号由 Dockerfile 从 `web/package.json` 自动解析，所以默认构建也会报出真实版本而不是 `dev`。
 提交号与构建时间不在构建上下文里（`.git` 被 `.dockerignore` 排除），想带上就显式传：
@@ -102,6 +114,26 @@ JEV_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
 docker compose up -d --build
 ```
 
+### 从旧版具名卷迁移（一次性）
+
+旧版 compose 把数据库放在具名卷 `jev-safety-gateway-data` 里，现在改为绑定挂载 `./data`。
+**用旧版部署过的，升级前务必先把卷里的数据搬过来**，否则 `up -d` 之后容器会以一个空库启动
+（旧卷不会被自动删除，数据仍在，搬完确认无误后再留着做保险）：
+
+```bash
+docker compose stop
+mkdir -p ./data
+docker run --rm \
+  -v jev-safety-gateway-data:/from \
+  -v "$PWD/data":/to \
+  alpine sh -c 'cp -a /from/. /to/'
+sudo chown -R 10001:10001 ./data   # 上面是 root 写的文件，得改回容器用户的属主
+docker compose up -d --build
+```
+
+（PowerShell 把 `"$PWD/data"` 写成 `"${PWD}/data"`。）若跳过这步而以空库启动，需要重新设
+管理员口令、重填上游地址与 JEV 密钥；审计日志与封禁规则仍留在旧卷里，恢复步骤同上。
+
 ### 配置
 
 打开 `http://<主机>:8081` 完成首次设置：管理员口令 → 上游地址 → 至少一个 JEV 密钥。
@@ -111,6 +143,46 @@ docker compose up -d --build
 ssh -L 8081:127.0.0.1:8081 <user>@<host>
 ```
 
+### 与别的 compose 项目互通网络
+
+上游（new-api 等）在**另一套 compose / 另一台容器**里时，网关解析不到它的服务名：容器名只在
+**同一张用户自定义网络**内可解析，而两个 compose 项目默认各建一张网，日志里是
+
+```
+upstream proxy error: dial tcp: lookup newapi on 127.0.0.11:53: no such host
+```
+
+（`127.0.0.11` 是 Docker 的内嵌 DNS。）先查出上游的网络名与别名：
+
+```bash
+docker network ls
+docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} aliases={{$v.Aliases}}{{"\n"}}{{end}}' <上游容器名>
+```
+
+再让网关加入那张网（`name:` 填查到的实际网络名，如 `new-api_default`）：
+
+```yaml
+services:
+  jev-safety-gateway:
+    # ...原有内容不动...
+    networks:
+      - default
+      - newapi            # 新增
+
+networks:
+  newapi:
+    external: true
+    name: <实际网络名>
+```
+
+`docker compose up -d` 重建网关容器即可。两点注意：
+
+- 服务一旦写了 `networks:` 就**只**加入列出的网络，漏掉 `default` 会把网关从自己那张网里摘出去。
+- 不用重启上游，也不用写 `depends_on`：网关不在启动时解析上游，而是每个请求现解析，接上网络后下一个请求就通。
+
+别名里没有 `newapi`（服务名可能是 `new-api` 之类）时，把上游地址改成 `http://别名:端口`。
+它已经写进库的话改 `.env` 无效，得去控制台改（原因见 README 的说明：上游只在库里该值为空时写入）。
+
 ### 升级
 
 ```bash
@@ -119,29 +191,30 @@ docker compose stop                 # 优雅停机，在途请求放完
 docker compose up -d --build
 ```
 
+> 从旧版具名卷升级上来的，先做一次上文的「从旧版具名卷迁移」，再做这一步。
+
 ### 备份与恢复
 
-卷名已显式写死为 `jev-safety-gateway-data`，命令在任何机器上都一样。
+数据库就在部署目录的 `./data/` 下，`.db` / `-wal` / `-shm` 三件套都在里面，直接打包整个目录即可。
 
 ```bash
 # 备份（必须先停：WAL 停止写入后再打包）
 docker compose stop
-docker run --rm \
-  -v jev-safety-gateway-data:/data \
-  -v "$PWD:/backup" \
-  alpine tar czf "/backup/jev-safety-gateway-$(date +%F).tar.gz" -C /data .
+tar czf "jev-safety-gateway-$(date +%F).tar.gz" -C ./data .
 docker compose start
 ```
 
 ```bash
-# 恢复（会先清空卷内容）
+# 恢复（先把现有目录挪走而不是删掉，出问题还能退回来）
 docker compose stop
-docker run --rm \
-  -v jev-safety-gateway-data:/data \
-  -v "$PWD:/backup" \
-  alpine sh -c 'rm -rf /data/* && tar xzf /backup/<备份文件>.tar.gz -C /data'
+mv ./data "./data.before-restore-$(date +%F)"
+mkdir -p ./data
+tar xzf <备份文件>.tar.gz -C ./data
 docker compose start
 ```
+
+> **`./data/` 里任何一个文件都不要单独删**。数据主要落在 WAL（`-wal` 常远大于主库），
+> 只留主库等于没备份；`rm` 不进回收站、没有卷影副本，删掉就是永久丢失。
 
 ### 日志
 
@@ -356,10 +429,9 @@ IP 风险分析页的「全球与区域威胁来源分布」「攻击特征与 A
 
 三平台落地：
 
-- **Docker / compose**：把数据库目录只读挂进容器，再让 env 指向容器内路径。
-  `docker-compose.yml` 已备注示例：`volumes:` 放开 `./geoip:/geoip:ro`，`environment:` 里
-  设 `JEV_GEOIP_COUNTRY_DB=/geoip/GeoLite2-Country.mmdb`、`JEV_GEOIP_ASN_DB=/geoip/GeoLite2-ASN.mmdb`
-  （经 `.env` 的 `${...}` 透传）。
+- **Docker / compose**：`docker-compose.yml` 已把 `./geoip` 只读挂到容器 `/geoip`，两个 env 的默认值
+  也已指向容器内路径——**把 `GeoLite2-Country.mmdb` / `GeoLite2-ASN.mmdb` 放进部署目录的 `./geoip/`
+  即可**，不用改任何配置（目录为空 = 该维度关闭；`.mmdb` 已在 `.gitignore` 里，不会被误提交）。
 - **Linux 裸机（systemd）**：在 `/etc/jev-safety-gateway/env` 里填**绝对路径**（见 `env.example` 注释）。
   若 unit 开了沙箱（`ProtectSystem` / `ReadOnlyPaths`），数据库须放在服务可读的路径下，
   例如 `/etc/jev-safety-gateway/geoip/`。

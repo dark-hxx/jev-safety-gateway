@@ -23,19 +23,29 @@ services:
       JEV_API_KEY: "${JEV_API_KEY:-}"                # 初始 JEV 密钥 (可选)
       JEV_ADMIN_PASSWORD: "${JEV_ADMIN_PASSWORD:-}"  # 初始管理员口令 (可选)
       # 可选 GeoIP 归属 (IP 风险分析页的国家/ASN 排行): 每次启动读取, 非一次性初始化。
-      # 指向容器内路径 (见下方 volumes 的只读挂载示例); 留空则该维度关闭、面板保持未接入。
-      JEV_GEOIP_COUNTRY_DB: "${JEV_GEOIP_COUNTRY_DB:-}"  # 如 /geoip/GeoLite2-Country.mmdb
-      JEV_GEOIP_ASN_DB: "${JEV_GEOIP_ASN_DB:-}"          # 如 /geoip/GeoLite2-ASN.mmdb
+      # 默认值就是容器内路径, 与下方 ./geoip:/geoip:ro 挂载配套——把两个 .mmdb 放进 ./geoip/
+      # 即生效, 不用改这里; 文件不存在或目录为空 = 该维度关闭, 面板保持未接入。
+      JEV_GEOIP_COUNTRY_DB: "${JEV_GEOIP_COUNTRY_DB:-/geoip/GeoLite2-Country.mmdb}"
+      JEV_GEOIP_ASN_DB: "${JEV_GEOIP_ASN_DB:-/geoip/GeoLite2-ASN.mmdb}"
       # 可选: 本网关部署坐标 (十进制度), 只用于来源图中心节点 (各来源向其汇聚)。
       # 网关自身出口 IP 离线不可知, 只能由部署方声明; 两个都要给且范围合法才算数,
       # 否则等同于没配 (图里只画来源标点, 不画中心节点与弧线)。
       JEV_GATEWAY_LAT: "${JEV_GATEWAY_LAT:-}"            # 如 31.23
       JEV_GATEWAY_LON: "${JEV_GATEWAY_LON:-}"            # 如 121.47
     volumes:
-      - jev-safety-gateway-data:/data
-      # 可选: 把运营方自备的 MaxMind 数据库目录只读挂进容器, 再让上面两个 env 指向容器内路径。
-      # GeoLite2 不随镜像捆绑 (许可 + 离线约束), 需自行从 MaxMind 下载。
-      # - ./geoip:/geoip:ro
+      # 数据库落在仓库的 ./data/ 下 (绑定挂载, 宿主随时可看、可备份、可直接检查)。
+      # 容器以非 root 的 uid 10001 运行, 而绑定挂载用的是宿主目录的属主 (具名卷会由镜像
+      # 初始化属主, 绑定挂载不会), 所以 Linux 上先建目录并改属主, 否则容器起不来
+      # (日志会报 open store: ... permission denied 并反复重启):
+      #   mkdir -p ./data && sudo chown -R 10001:10001 ./data
+      # .db / -wal / -shm 三件套都在这里, 数据主要落在 WAL 里——必须整体保护,
+      # 不要单独删或单独拷贝某一个文件。
+      - ./data:/data
+      # GeoIP 库: 把从 MaxMind 下载的 GeoLite2-Country.mmdb / GeoLite2-ASN.mmdb 放进 ./geoip/
+      # 即生效 (上面两个 env 已默认指向容器内 /geoip/...)。只读挂载, 目录为空则该维度关闭。
+      # 只需可读, 不用改属主。GeoLite2 不随镜像捆绑 (许可 + 离线约束), 需自备;
+      # .mmdb 已加入 .gitignore 与 .dockerignore。
+      - ./geoip:/geoip:ro
     # 容器日志默认无限增长，长期运行必须设上限。
     logging:
       driver: json-file
@@ -57,9 +67,3 @@ services:
   #     - ./nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
   #   depends_on:
   #     - jev-safety-gateway
-
-volumes:
-  jev-safety-gateway-data:
-    # 显式命名，否则 compose 会加项目名前缀（如 jev_jev-safety-gateway-data），
-    # 备份命令就得跟着目录名变。写死之后备份/恢复命令在任何机器上都一样。
-    name: jev-safety-gateway-data

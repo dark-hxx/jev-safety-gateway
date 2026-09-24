@@ -57,6 +57,10 @@ flowchart LR
 
 内置管理控制台：Vue 3 单页应用，构建产物随仓库提交、离线内嵌，开箱即用；支持深色 / 浅色 / 跟随系统主题与中英文切换。下图为深色主题。
 
+**在线演示**：<https://jev-gateway.clim.asia/> ｜ 口令 `123456`
+
+> 公共测试实例，仅供预览界面。**请勿在其中填入真实 JEV 密钥，也不要拿它过滤真实流量**——口令是公开的。
+
 <div align="center">
 
 **运行概览 · 安全监控驾驶舱** — 转送量、判定构成、逐桶流量趋势与风险分值分布
@@ -93,20 +97,24 @@ flowchart LR
 ## 🚀 快速开始（Docker）
 
 ```bash
-cp .env.example .env      # 按需填写上游地址 / 初始密钥 / 管理员口令（都可留空，后续在控制台配置）
-docker compose up -d --build
+mkdir -p ./data ./geoip && sudo chown -R 10001:10001 ./data   # Linux 必需，见下
+
+docker run -d --name jev-safety-gateway --restart unless-stopped \
+  -p 8080:8080 -p 127.0.0.1:8081:8081 \
+  -v "$PWD/data:/data" -v "$PWD/geoip:/geoip:ro" \
+  ghcr.io/dark-hxx/jev-safety-gateway:latest
 ```
 
-- 过滤代理监听 `:8080`（nginx 转发到这里）
-- 管理控制台监听 `127.0.0.1:8081`（**只绑本机**）
+- 过滤代理监听 `:8080`（nginx 转发到这里），管理控制台 `127.0.0.1:8081`（**只绑本机**）
+- `./data/` 是数据库目录（`.db` / `-wal` / `-shm` 三件套都在里面，**备份就是打包它，里面任何一个文件都不要单独删**）
+- `./geoip/` 放自备的 MaxMind 库，放进去即生效；空目录则该维度关闭
+- 容器以非 root 的 uid 10001 运行，而绑定挂载用的是宿主目录的属主——Linux 上不改 `./data` 属主就起不来，日志报 `open store: … permission denied` 并反复重启（Docker Desktop 一般不用改）
 
-打开 `http://127.0.0.1:8081`：首次访问会要求设置管理员口令，登录后在控制台填写：
+打开 `http://127.0.0.1:8081`：首次访问要求设置管理员口令，登录后填**上游地址**、加至少一个 **JEV 密钥**。远程机器走 SSH 隧道：`ssh -L 8081:127.0.0.1:8081 <user>@<host>`。
 
-1. **上游地址** `upstream_base_url`，例如 `http://newapi:3000`
-2. 至少添加一个 **JEV 调用密钥**（`apikey_...`）
-3. 视需要调整安全阈值 / 判定指令 / fail-open 开关
+> ⚠️ 上游地址**只在库里该值为空时**写入，一旦启动就写死了：填错只能去控制台改，改 `.env` / 环境变量都无效。拿不准就留空——网关会明确返回 `502 gateway upstream not configured`，而不是静默失败。
 
-之后把客户端流量指向网关（或经由 nginx，见 `nginx/gateway.conf`）即可。
+之后把客户端流量指向网关（或经由 nginx，见 `nginx/gateway.conf`）即可。需要 `.env`、源码构建或与 new-api 一起编排，见[快速安装 → Docker](#docker)。
 
 ---
 
@@ -118,43 +126,26 @@ docker compose up -d --build
 
 ### Docker
 
-**方式一：`docker run`（拉预构建镜像，最快）**
+**方式一：`docker run`（拉预构建镜像，最快）** —— 命令见上面的[快速开始](#-快速开始docker)。
+
+**方式二：`docker compose`（clone 源码自行构建，便于与 new-api 等一起编排）**
 
 ```bash
-docker run -d --name jev-safety-gateway --restart unless-stopped \
-  -p 8080:8080 -p 127.0.0.1:8081:8081 \
-  -v jev-safety-gateway-data:/data \
-  ghcr.io/dark-hxx/jev-safety-gateway:latest
+git clone https://github.com/dark-hxx/jev-safety-gateway.git
+cd jev-safety-gateway
+cp .env.example .env               # 按需填写上游地址 / 初始密钥 / 管理员口令
+mkdir -p ./data ./geoip
+sudo chown -R 10001:10001 ./data   # Linux 必需
+docker compose up -d --build
 ```
 
-**方式二：`docker compose`（便于与 new-api 等一起编排）**
+仓库自带的 `docker-compose.yml` 已配好端口映射、`./data` 与 `./geoip` 的绑定挂载、日志上限，改 `.env` 即可，不必动它。
 
-新建 `docker-compose.yml`，同样直接用预构建镜像、无需源码：
+- **挂的是目录，不是单个 `.db` 文件**：库跑在 WAL 模式，已提交的数据在 checkpoint 之前都住在 `-wal` 里；只挂 `.db` 会让 `-wal` / `-shm` 落在容器可写层，容器一重建就丢。备份就是打包 `./data/` 整个目录，**里面任何一个文件都不要单独删**。
+- 想用预构建镜像而不在本机构建：把 `build:` 段换成 `image: ghcr.io/dark-hxx/jev-safety-gateway:latest` 并删掉 `args:` 即可（此时没有 `.env` 入口，上游地址 / 密钥 / 口令只能在控制台填）。
+- 上游在另一套 compose / 容器里、网关解析不到它：见 [docs/deployment.md](docs/deployment.md) 的「与别的 compose 项目互通网络」。
 
-```yaml
-services:
-  jev-safety-gateway:
-    image: ghcr.io/dark-hxx/jev-safety-gateway:latest
-    container_name: jev-safety-gateway
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-      - "127.0.0.1:8081:8081"
-    volumes:
-      - jev-safety-gateway-data:/data
-    logging:                       # 容器日志默认无限增长，务必设上限
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
-volumes:
-  jev-safety-gateway-data:
-    name: jev-safety-gateway-data
-```
-
-```bash
-docker compose up -d
-```
-
-> 仓库根目录自带的 `docker-compose.yml` 走的是**从源码构建**（`build:` + `--build`，供开发用）；上面这份直接用预构建镜像，适合只想跑起来的部署。
+升级：`git pull && docker compose up -d --build`。**从旧版升上来的**（那时数据库在具名卷 `jev-safety-gateway-data` 里）要先搬一次数据，否则新容器会以空库启动——命令见 [docs/deployment.md](docs/deployment.md) 的「从旧版具名卷迁移」。
 
 ### Linux（装成 systemd 服务）
 
@@ -360,6 +351,8 @@ web/                       管理控制台前端工程（Vue 3 + Vite + TS + Tai
   src/                       源码（路由、模块、组件、接口封装）
   dist/                      构建产物，随源码入库并经 //go:embed 内嵌
 nginx/gateway.conf         nginx 反代示例
+data/                      运行态数据库（首次运行生成；已 .gitignore，**绝不要删**）
+geoip/                     自备的 MaxMind 库放这里（同上，不入库）
 scripts/                   Windows 本地 test 打包与启动、Windows 服务安装/卸载
 deploy/                    Linux 部署产物（systemd unit、install.sh、env.example）
 .github/workflows/         CI 与发布（打 tag 出全平台包 + 推 ghcr 镜像）
@@ -373,8 +366,9 @@ Dockerfile, docker-compose.yml
 
 - 管理控制台（`127.0.0.1:8081`）默认只绑本机。生产环境请置于内网，或在 nginx 层叠加 IP 白名单 / TLS / basic auth。
   远程访问请用 SSH 隧道（`ssh -L 8081:127.0.0.1:8081 <user>@<host>`），**不要**改绑 `0.0.0.0`——控制台除自身登录外没有别的保护。
+- **公开演示实例**（见[界面展示](#-界面展示)）：口令随 README 公开，任何人登录后都能改它的配置、看它的审计记录。只当预览界面用，别往里填真实密钥，也别把真实流量打进去。
 - 网关本身不校验客户端 apikey；对客户端的鉴权仍由上游（new-api 等）负责。网关只做内容安全过滤。
-- JEV 密钥、管理员口令哈希保存在 SQLite（Docker volume `jev-safety-gateway-data`），请妥善保管该卷。
+- JEV 密钥、管理员口令哈希保存在 SQLite（Docker 下是部署目录的 `./data/`，绑到容器 `/data`），请妥善保管。
 - **`GET /api/version` 是唯一免鉴权的 `/api/` 路由**：登录页需要在拿到 token 之前显示版本号与守护进程地址。
   它只返回构建标识（版本、短提交号、构建时间、Go 版本）与实际绑定的监听地址，不含任何审计数据；
   审计日志派生的延迟分位在受保护的 `GET /api/stats/latency` 下。若这条公开面不可接受，
