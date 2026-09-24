@@ -131,6 +131,12 @@ const ICONS: Record<string, string> = {
     <path d="M12 3.6v11.4"/>
     <path d="M7.4 10.4L12 15l4.6-4.6"/>
     <path d="M4.4 20.4h15.2"/>`,
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  trash: `
+    <path d="M4 7h16"/>
+    <path d="M9 7V5.4A1.4 1.4 0 0 1 10.4 4h3.2A1.4 1.4 0 0 1 15 5.4V7"/>
+    <path d="M6.5 7l.9 12.1A1.6 1.6 0 0 0 9 20.6h6a1.6 1.6 0 0 0 1.6-1.5L17.5 7"/>
+    <path d="M10 11v6M14 11v6"/>`,
   'filter-off': `
     <path d="M4.6 5.4h14.8l-5.9 6.9v6.3l-3-1.8v-4.5z"/>
     <path d="M3.4 3.4l17.2 17.2"/>`,

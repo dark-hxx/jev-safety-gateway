@@ -228,3 +228,33 @@ export interface IpStatsResponse extends IPStatsSummary {
   bans: BanEntry[]
   ban_count: number
 }
+
+/**
+ * IPRule 是持久化的 IP 访问规则（GET/POST/DELETE /api/ip-rules），与内存态 abuse
+ * 封禁互补：block 为手动/CIDR/永久封禁，allow 为白名单放行（优先于任何封禁，但不
+ * 豁免内容检定）。时间字段是 Go time.Time 的 RFC3339 字符串；`expires_at` 为空表示
+ * 永久（allow 恒为永久，字段省略）。
+ */
+export interface IPRule {
+  id: number
+  pattern: string
+  is_cidr: boolean
+  kind: 'block' | 'allow'
+  expires_at?: string
+  reason: string
+  created_at: string
+}
+
+/** 新增规则的请求体。allow 规则忽略时长；临时 block 需 duration_sec > 0。 */
+export interface IPRuleInput {
+  pattern: string
+  kind: 'block' | 'allow'
+  reason: string
+  permanent: boolean
+  duration_sec: number
+}
+
+/** GET /api/ip-rules 的响应；空规则池时后端可能省略 items 为 null。 */
+export interface IPRulesResponse {
+  items: IPRule[] | null
+}

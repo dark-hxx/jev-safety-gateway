@@ -9,6 +9,9 @@
  */
 import { t } from './i18n'
 import type {
+  IPRule,
+  IPRuleInput,
+  IPRulesResponse,
   IpStatsResponse,
   JEVKey,
   LatencyStats,
@@ -193,6 +196,30 @@ export async function getIpStats(hours: number, limit: number): Promise<IpStatsR
   return { ...r, items: r.items ?? [], bans: r.bans ?? [] }
 }
 
+/**
+ * `GET /api/ip-rules`：持久化 IP 规则列表（手动/CIDR/永久封禁 + 白名单）。空池时后端
+ * 可能返回 `items: null`，这里归一化为空数组。与 `/api/stats/ip` 报告的 abuse 实时封禁
+ * 互补：两者都进入代理的 JEV 前拦截路径，allow 规则优先于任何封禁。需要 token。
+ */
+export async function listIpRules(): Promise<IPRule[]> {
+  const r = await request<IPRulesResponse>('/api/ip-rules')
+  return r.items ?? []
+}
+
+/**
+ * `POST /api/ip-rules`：新增（或对同 pattern+kind 刷新）一条规则。allow 规则恒为永久，
+ * 时长参数被忽略；临时 block 需 `duration_sec > 0`，`permanent` 为 true 时为永久封禁。
+ * 后端会校验并规范化 pattern（单个 IP 或 CIDR），非法输入返回 400。
+ */
+export function addIpRule(input: IPRuleInput): Promise<IPRule> {
+  return request<IPRule>('/api/ip-rules', { method: 'POST', body: JSON.stringify(input) })
+}
+
+/** `DELETE /api/ip-rules/{id}`：删除一条规则（解封 / 移除白名单条目）。 */
+export function deleteIpRule(id: number): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/ip-rules/${id}`, { method: 'DELETE' })
+}
+
 /** `/api/logs` 的筛选条件，语义与 internal/config.LogFilter 一致（条件之间为「与」）。 */
 export interface LogFilter {
   limit: number
@@ -231,4 +258,4 @@ export function queryLogModels(since: number): Promise<LogModelsResponse> {
   return request<LogModelsResponse>('/api/logs/models?' + p.toString())
 }
 
-export type { IpStatsResponse, JEVKey, LatencyStats, LogEntry, LogModelsResponse, LogsResponse, ModelCount, Settings, StatBucket, Stats, StatsResponse, StateResponse, VersionInfo }
+export type { IpStatsResponse, IPRule, IPRuleInput, IPRulesResponse, JEVKey, LatencyStats, LogEntry, LogModelsResponse, LogsResponse, ModelCount, Settings, StatBucket, Stats, StatsResponse, StateResponse, VersionInfo }

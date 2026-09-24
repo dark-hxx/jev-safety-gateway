@@ -4,11 +4,12 @@ import { useRouter } from 'vue-router'
 import Icon from '../../components/Icon.vue'
 import HintTip from '../../components/HintTip.vue'
 import NotConnected from '../../components/NotConnected.vue'
+import SelectMenu from '../../components/SelectMenu.vue'
 import * as api from '../../api'
 import { durationOf, num, pctText, relativeOf, score } from '../../format'
 import { useI18n } from '../../i18n'
 import type { MessageKey } from '../../i18n/zh'
-import type { BanEntry, IPStat, IpStatsResponse } from '../../types'
+import type { BanEntry, IPRule, IPStat, IpStatsResponse } from '../../types'
 
 /**
  * IP 风险分析与统计。
@@ -21,9 +22,10 @@ import type { BanEntry, IPStat, IpStatsResponse } from '../../types'
  *   danger = max(0, 1-avgScore) × blocked/scored × min(1, total/40)
  * 每一档都能由本页同时展示的原始计数复核，不是黑盒。
  *
- * 原型中依赖缺失后端的区域一律以 NotConnected 降级：地理/区域分布与 ASN 映射
- * （需 GeoIP，后续版本），以及手动封禁、CIDR、永久黑名单与白名单管理
- * （需新增规则表与写接口，后续版本）。本页只呈现有来源的数字。
+ * 封禁规则池（手动 / CIDR / 永久封禁 + 白名单）来自 GET/POST/DELETE /api/ip-rules，
+ * 与实时 abuse 封禁互补、持久化于 SQLite；白名单优先于封禁但不豁免内容检定。
+ * 仅地理 / 区域分布与 ASN 映射仍以 NotConnected 降级（需 GeoIP，后续版本）。
+ * 本页只呈现有来源的数字。
  */
 const router = useRouter()
 const { t } = useI18n()
@@ -95,6 +97,7 @@ let timer: number | undefined
 let clock: number | undefined
 onMounted(() => {
   void load()
+  void loadRules()
   timer = window.setInterval(() => void load(), 5000)
   clock = window.setInterval(() => (nowMs.value = Date.now()), 1000)
 })
@@ -193,6 +196,102 @@ function exportCsv(): void {
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+// --- 持久化 IP 规则（封禁 / 白名单）管理，GET/POST/DELETE /api/ip-rules ---
+const rules = ref<IPRule[]>([])
+const rulesError = ref('')
+const newPattern = ref('')
+const newKind = ref<'block' | 'allow'>('block')
+/** 临时封禁时长（秒）预设，或 'permanent' 表示永久；白名单忽略此项。 */
+const newDuration = ref<'600' | '3600' | '86400' | 'permanent'>('3600')
+const newReason = ref('')
+const submitting = ref(false)
+
+/** 规则类型与封禁时长的下拉选项（随语言切换实时更新，SelectMenu 自绘以对齐控制台风格）。 */
+const kindOptions = computed(() => [
+  { value: 'block', label: t('ipa.manage.kindBlock') },
+  { value: 'allow', label: t('ipa.manage.kindAllow') },
+])
+const durationOptions = computed(() => [
+  { value: '600', label: t('ipa.manage.dur10m') },
+  { value: '3600', label: t('ipa.manage.dur1h') },
+  { value: '86400', label: t('ipa.manage.dur24h') },
+  { value: 'permanent', label: t('ipa.manage.durPermanent') },
+])
+
+/** SelectMenu 以 string 双向绑定，这里把值收窄回各自的字面量联合，避免类型断言。 */
+function setKind(v: string): void {
+  newKind.value = v === 'allow' ? 'allow' : 'block'
+}
+function isDuration(v: string): v is '600' | '3600' | '86400' | 'permanent' {
+  return v === '600' || v === '3600' || v === '86400' || v === 'permanent'
+}
+function setDuration(v: string): void {
+  if (isDuration(v)) newDuration.value = v
+}
+
+async function loadRules(): Promise<void> {
+  try {
+    rules.value = await api.listIpRules()
+    rulesError.value = ''
+  } catch (e) {
+    rulesError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function addRule(): Promise<void> {
+  const pattern = newPattern.value.trim()
+  if (!pattern || submitting.value) return
+  submitting.value = true
+  rulesError.value = ''
+  try {
+    const permanent = newKind.value === 'allow' || newDuration.value === 'permanent'
+    await api.addIpRule({
+      pattern,
+      kind: newKind.value,
+      reason: newReason.value.trim(),
+      permanent,
+      duration_sec: permanent ? 0 : Number(newDuration.value),
+    })
+    newPattern.value = ''
+    newReason.value = ''
+    await Promise.all([loadRules(), load()])
+  } catch (e) {
+    rulesError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function removeRule(rule: IPRule): Promise<void> {
+  if (!window.confirm(t('ipa.manage.deleteConfirm', { pattern: rule.pattern }))) return
+  rulesError.value = ''
+  try {
+    await api.deleteIpRule(rule.id)
+    await Promise.all([loadRules(), load()])
+  } catch (e) {
+    rulesError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+/** 从排行表一键手动封禁：默认 1 小时临时封禁，随后刷新规则池与统计。 */
+async function banIp(ip: string): Promise<void> {
+  if (!window.confirm(t('ipa.action.banConfirm', { ip }))) return
+  rulesError.value = ''
+  try {
+    await api.addIpRule({ pattern: ip, kind: 'block', reason: t('ipa.action.ban'), permanent: false, duration_sec: 3600 })
+    await Promise.all([loadRules(), load()])
+  } catch (e) {
+    rulesError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+/** 规则到期时刻（unix 毫秒）；expires_at 缺省（永久规则）时返回 null。 */
+function ruleExpiryMs(rule: IPRule): number | null {
+  if (!rule.expires_at) return null
+  const ms = Date.parse(rule.expires_at)
+  return Number.isNaN(ms) ? null : ms
 }
 </script>
 
@@ -359,14 +458,25 @@ function exportCsv(): void {
                   </span>
                 </td>
                 <td class="px-space-sm py-2.5 text-right">
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-caption-2 font-caption-2 text-on-surface transition-colors"
-                    @click="viewAudit(it.ip)"
-                  >
-                    <Icon name="search-check" class="text-[14px]" />
-                    <span>{{ t('ipa.viewAudit') }}</span>
-                  </button>
+                  <div class="inline-flex items-center justify-end gap-1.5">
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-caption-2 font-caption-2 text-on-surface transition-colors"
+                      @click="viewAudit(it.ip)"
+                    >
+                      <Icon name="search-check" class="text-[14px]" />
+                      <span>{{ t('ipa.viewAudit') }}</span>
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-error-container hover:bg-error-container/80 text-caption-2 font-caption-2 text-error transition-colors"
+                      :title="t('ipa.action.ban')"
+                      @click="banIp(it.ip)"
+                    >
+                      <Icon name="ban" class="text-[14px]" />
+                      <span>{{ t('ipa.action.ban') }}</span>
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -472,16 +582,124 @@ function exportCsv(): void {
       </div>
     </section>
 
-    <!-- 封禁规则池与黑白名单管理：需持久化规则表与写接口，后续版本，降级为未接入 -->
-    <section class="flex flex-col gap-space-sm p-space-lg rounded-2xl bg-surface-container shadow-md border border-hairline">
-      <div class="flex items-center justify-between flex-wrap gap-space-xs">
-        <div class="flex items-center gap-2">
-          <Icon name="rule" class="text-outline text-[20px]" />
+    <!-- 封禁规则池与黑白名单管理（GET/POST/DELETE /api/ip-rules，持久化于 SQLite） -->
+    <section class="flex flex-col gap-space-md p-space-lg rounded-2xl bg-surface-container shadow-md border border-hairline">
+      <div class="flex flex-col gap-1">
+        <div class="flex items-center gap-2 flex-wrap">
+          <Icon name="rule" class="text-primary text-[20px]" />
           <span class="text-title-3 font-title-3 text-on-surface">{{ t('ipa.manage.title') }}</span>
+          <HintTip :text="t('ipa.manage.note')" />
         </div>
-        <NotConnected :reason="t('ipa.manage.reason')" />
+        <p class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('ipa.manage.sub') }}</p>
       </div>
-      <NotConnected variant="placeholder" :reason="t('ipa.manage.reason')" />
+      <form class="grid grid-cols-1 md:grid-cols-12 gap-space-sm items-end" @submit.prevent="addRule">
+        <label class="md:col-span-4 flex flex-col gap-1">
+          <span class="text-caption-2 font-caption-2 text-on-surface-variant">{{ t('ipa.manage.pattern') }}</span>
+          <input
+            v-model="newPattern"
+            type="text"
+            spellcheck="false"
+            :placeholder="t('ipa.manage.patternPlaceholder')"
+            class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface font-code-body text-code-body focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
+          />
+        </label>
+        <label class="md:col-span-2 flex flex-col gap-1">
+          <span class="text-caption-2 font-caption-2 text-on-surface-variant">{{ t('ipa.manage.kind') }}</span>
+          <SelectMenu
+            :model-value="newKind"
+            :options="kindOptions"
+            :aria-label="t('ipa.manage.kind')"
+            @update:model-value="setKind"
+          />
+        </label>
+        <label class="md:col-span-2 flex flex-col gap-1" :class="newKind === 'allow' ? 'opacity-40' : ''">
+          <span class="text-caption-2 font-caption-2 text-on-surface-variant">{{ t('ipa.manage.duration') }}</span>
+          <SelectMenu
+            :model-value="newDuration"
+            :options="durationOptions"
+            :disabled="newKind === 'allow'"
+            :aria-label="t('ipa.manage.duration')"
+            @update:model-value="setDuration"
+          />
+        </label>
+        <label class="md:col-span-3 flex flex-col gap-1">
+          <span class="text-caption-2 font-caption-2 text-on-surface-variant">{{ t('ipa.manage.reasonLabel') }}</span>
+          <input
+            v-model="newReason"
+            type="text"
+            :placeholder="t('ipa.manage.reasonPlaceholder')"
+            class="w-full px-3 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
+          />
+        </label>
+        <button
+          type="submit"
+          :disabled="submitting || !newPattern.trim()"
+          class="md:col-span-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl bg-primary-container hover:bg-primary-container/90 text-on-primary-container text-subheadline font-subheadline font-semibold shadow-md transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Icon name="plus" class="text-[16px]" />
+          <span class="whitespace-nowrap">{{ submitting ? t('ipa.manage.submitting') : t('ipa.manage.submit') }}</span>
+        </button>
+      </form>
+      <span v-if="rulesError" class="text-caption-1 font-caption-1 text-error">{{ t('ipa.manage.error', { msg: rulesError }) }}</span>
+      <div class="flex items-center justify-between">
+        <span class="text-subheadline font-subheadline text-on-surface">{{ t('ipa.manage.listTitle') }}</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-surface-bright text-on-surface-variant">{{ t('ipa.manage.count', { n: num(rules.length) }) }}</span>
+      </div>
+      <div class="overflow-auto rounded-xl border border-hairline">
+        <table class="w-full min-w-[40rem] text-left border-collapse">
+          <thead class="bg-surface-container-high">
+            <tr class="text-caption-2 font-caption-2 text-on-surface-variant">
+              <th class="px-space-sm py-2 font-medium whitespace-nowrap">{{ t('ipa.manage.colPattern') }}</th>
+              <th class="px-space-sm py-2 font-medium whitespace-nowrap">{{ t('ipa.manage.colKind') }}</th>
+              <th class="px-space-sm py-2 font-medium whitespace-nowrap">{{ t('ipa.manage.colExpiry') }}</th>
+              <th class="px-space-sm py-2 font-medium">{{ t('ipa.manage.colReason') }}</th>
+              <th class="px-space-sm py-2 font-medium text-right">{{ t('ipa.col.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in rules" :key="r.id" class="border-t border-hairline align-top">
+              <td class="px-space-sm py-2 whitespace-nowrap">
+                <span class="font-code-body text-code-body text-on-surface mono">{{ r.pattern }}</span>
+                <span v-if="r.is_cidr" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-code-badge font-code-badge bg-surface-bright text-outline">{{ t('ipa.manage.cidrTag') }}</span>
+              </td>
+              <td class="px-space-sm py-2 whitespace-nowrap">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge" :class="r.kind === 'allow' ? 'bg-secondary/15 text-secondary' : 'bg-error-container text-error'">
+                  {{ r.kind === 'allow' ? t('ipa.manage.badgeAllow') : t('ipa.manage.badgeBlock') }}
+                </span>
+              </td>
+              <td class="px-space-sm py-2 whitespace-nowrap">
+                <template v-if="ruleExpiryMs(r) === null">
+                  <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('ipa.manage.permanent') }}</span>
+                </template>
+                <template v-else>
+                  <span class="text-caption-1 font-caption-1 mono" :class="remainSecOf(ruleExpiryMs(r) ?? 0) > 0 ? 'text-on-surface-variant' : 'text-outline'">
+                    {{ remainSecOf(ruleExpiryMs(r) ?? 0) > 0 ? t('ipa.manage.remain', { v: durationOf(remainSecOf(ruleExpiryMs(r) ?? 0)) }) : t('ipa.manage.expired') }}
+                  </span>
+                  <span class="block text-caption-2 font-caption-2 text-outline">{{ t('ipa.manage.expiresAt', { v: untilText(ruleExpiryMs(r) ?? 0) }) }}</span>
+                </template>
+              </td>
+              <td class="px-space-sm py-2">
+                <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2 break-all">{{ r.reason || '-' }}</span>
+              </td>
+              <td class="px-space-sm py-2 text-right">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-error-container text-caption-2 font-caption-2 text-on-surface hover:text-error transition-colors"
+                  @click="removeRule(r)"
+                >
+                  <Icon name="trash" class="text-[14px]" />
+                  <span>{{ t('ipa.manage.delete') }}</span>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!rules.length" class="flex flex-col items-center justify-center gap-1.5 py-space-lg px-space-md text-center">
+          <Icon name="rule" class="text-outline text-[24px]" />
+          <span class="text-subheadline font-subheadline text-on-surface-variant">{{ t('ipa.manage.empty') }}</span>
+          <span class="text-caption-2 font-caption-2 text-outline">{{ t('ipa.manage.emptyHint') }}</span>
+        </div>
+      </div>
     </section>
   </div>
 </template>

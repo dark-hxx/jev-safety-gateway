@@ -18,9 +18,10 @@ import (
 
 // Store is a thread-safe SQLite-backed configuration and log store.
 type Store struct {
-	db  *sql.DB
-	mu  sync.RWMutex
-	set Settings // cached settings
+	db      *sql.DB
+	mu      sync.RWMutex
+	set     Settings     // cached settings
+	ipRules []parsedRule // cached, match-ready persisted IP rules (see iprules.go)
 }
 
 // Open opens (creating if needed) the SQLite database at path and initializes
@@ -42,6 +43,9 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	if err := s.load(); err != nil {
+		return nil, err
+	}
+	if err := s.reloadIPRules(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -82,6 +86,19 @@ func (s *Store) migrate() error {
 		// Covers the latency percentile query: both columns come from the index,
 		// so the window scan never touches the table rows.
 		`CREATE INDEX IF NOT EXISTS idx_logs_ts_latency ON logs(ts DESC, latency_ms)`,
+		// Persisted IP access rules (manual/CIDR/permanent bans + allowlist). The
+		// unique index on (pattern,kind) backs the upsert in AddIPRule so re-banning
+		// the same target refreshes its expiry instead of stacking duplicate rows.
+		`CREATE TABLE IF NOT EXISTS ip_rules (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			pattern    TEXT NOT NULL,
+			is_cidr    INTEGER NOT NULL DEFAULT 0,
+			kind       TEXT NOT NULL,
+			expires_at INTEGER,
+			reason     TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_rules_pattern_kind ON ip_rules(pattern, kind)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {

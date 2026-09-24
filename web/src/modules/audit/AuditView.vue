@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Icon from '../../components/Icon.vue'
 import NotConnected from '../../components/NotConnected.vue'
+import SelectMenu from '../../components/SelectMenu.vue'
 import * as api from '../../api'
 import { useConsole } from '../../console'
 import { clockOf, dateTimeOf, decisionStyle, methodClass, num, score, scoreWidth } from '../../format'
@@ -163,6 +164,15 @@ const modelChoices = computed<ModelCount[]>(() => {
   if (!cur || modelOptions.value.some((m) => m.value === cur)) return modelOptions.value
   return [{ value: cur, count: 0 }, ...modelOptions.value]
 })
+
+/** 模型筛选下拉的选项（SelectMenu 自绘以对齐控制台风格）：首项为「全部模型」，其余带最近计数。 */
+const modelSelectOptions = computed(() => [
+  { value: '', label: t('audit.filter.allModels') },
+  ...modelChoices.value.map((m) => ({
+    value: m.value,
+    label: m.count > 0 ? `${m.value} (${num(m.count)})` : t('audit.filter.noRecent', { model: m.value }),
+  })),
+])
 
 function go(delta: number): void {
   const next = offset.value + delta * PAGE_SIZE
@@ -341,18 +351,12 @@ onBeforeUnmount(() => {
         </label>
         <label class="flex flex-col gap-1.5">
           <span class="text-caption-2 font-caption-2 text-outline">{{ t('audit.filter.model') }}</span>
-          <span class="relative">
-            <select
-              v-model="model"
-              class="w-full appearance-none pl-3 pr-8 py-2 rounded-xl bg-surface-container-high text-on-surface text-subheadline font-subheadline focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset mono"
-            >
-              <option value="">{{ t('audit.filter.allModels') }}</option>
-              <option v-for="m in modelChoices" :key="m.value" :value="m.value">
-                {{ m.count > 0 ? `${m.value} (${num(m.count)})` : t('audit.filter.noRecent', { model: m.value }) }}
-              </option>
-            </select>
-            <Icon name="chevron-down" class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-outline text-[16px]" />
-          </span>
+          <SelectMenu
+            v-model="model"
+            :options="modelSelectOptions"
+            mono
+            :aria-label="t('audit.filter.model')"
+          />
         </label>
         <label class="flex flex-col gap-1.5">
           <span class="text-caption-2 font-caption-2 text-outline">{{ t('audit.filter.path') }}</span>

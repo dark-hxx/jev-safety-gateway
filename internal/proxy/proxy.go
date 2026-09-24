@@ -132,8 +132,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Persisted IP rules and live abuse bans both reject before any JEV call. An
+	// allowlist match wins over every ban — persisted or automatic — and also
+	// suppresses abuse strike accrual below, but it never bypasses content
+	// filtering: an allowlisted source can still be blocked on a harmful payload.
+	allowlisted := false
+	if set.Enabled {
+		allow, blocked, until, permanent := h.store.MatchIPRules(ip, start)
+		allowlisted = allow
+		if !allow && blocked {
+			reason := "IP 处于永久封禁名单，请求被拒绝"
+			if !permanent {
+				reason = "IP 处于封禁名单，封禁至 " + until.Format("15:04:05")
+			}
+			logx.Debugf("  ip=%s matched block rule (permanent=%v) → 429", ip, permanent)
+			h.store.AddLog(config.LogEntry{
+				TS: start, Method: r.Method, Path: r.URL.Path, Kind: "iprule",
+				Decision: "block", LatencyMS: time.Since(start).Milliseconds(),
+				IP: ip, Reason: reason,
+			})
+			h.writeRuleBanned(w, permanent, until)
+			return
+		}
+	}
+
 	// Fast path: reject IPs already banned for abuse, without calling JEV.
-	if set.Enabled && set.AbuseEnabled {
+	if set.Enabled && set.AbuseEnabled && !allowlisted {
 		if banned, until := h.abuse.Banned(ip, start); banned {
 			logx.Debugf("  ip=%s is banned until %s → 429", ip, until.Format("15:04:05"))
 			h.store.AddLog(config.LogEntry{
@@ -168,8 +192,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		decision, kind, model, scoreStr(score), reason, debugSnippet(set, snippet))
 
 	// A genuine harmful-content block (score present) counts as a strike; enough
-	// strikes within the window ban the IP.
-	if set.Enabled && set.AbuseEnabled && decision == "block" && score != nil {
+	// strikes within the window ban the IP. Allowlisted sources never accrue
+	// strikes, so a trusted-but-noisy origin is not auto-banned.
+	if set.Enabled && set.AbuseEnabled && !allowlisted && decision == "block" && score != nil {
 		if tripped, until := h.abuse.Strike(ip, start, set.AbuseWindowSec, set.AbuseMaxHarmful, set.AbuseBanSec); tripped {
 			reason += "；已触发滥用封禁至 " + until.Format("15:04:05")
 		}
@@ -403,6 +428,25 @@ func (h *Handler) writeBanned(w http.ResponseWriter, set config.Settings, until 
 			"message": "检测到大量攻击性请求，来源 IP 已被临时封禁 (rate limited by JEV safety gateway).",
 			"type":    "jev_abuse_block",
 			"code":    "ip_temporarily_banned",
+		},
+	})
+}
+
+// writeRuleBanned rejects a request from an IP matched by a persisted block rule
+// (manual ban, CIDR block, or permanent blacklist). A permanent ban omits
+// Retry-After; a temporary one reports the remaining seconds like an abuse ban.
+func (h *Handler) writeRuleBanned(w http.ResponseWriter, permanent bool, until time.Time) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-JEV-Gateway", "banned")
+	if !permanent {
+		w.Header().Set("Retry-After", formatRetryAfter(until))
+	}
+	w.WriteHeader(http.StatusTooManyRequests)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"error": map[string]interface{}{
+			"message": "来源 IP 已被安全网关封禁 (blocked by JEV safety gateway IP rules).",
+			"type":    "jev_ip_rule_block",
+			"code":    "ip_blocked_by_rule",
 		},
 	})
 }

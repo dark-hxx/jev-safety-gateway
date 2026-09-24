@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"jev-safety-gateway/internal/config"
+	"jev-safety-gateway/internal/logx"
 )
 
 // Info is the console's self-description, served by GET /api/version.
@@ -68,6 +69,8 @@ func New(store *config.Store, webFS fs.FS, info *Info, bans BanSnapshot) *Handle
 	mux.HandleFunc("/api/settings", h.auth(h.settings))
 	mux.HandleFunc("/api/keys", h.auth(h.keys))
 	mux.HandleFunc("/api/keys/", h.auth(h.keyItem))
+	mux.HandleFunc("/api/ip-rules", h.auth(h.ipRules))
+	mux.HandleFunc("/api/ip-rules/", h.auth(h.ipRuleItem))
 	mux.HandleFunc("/api/logs", h.auth(h.logs))
 	mux.HandleFunc("/api/logs/models", h.auth(h.logModels))
 	mux.HandleFunc("/api/stats", h.auth(h.stats))
@@ -289,6 +292,83 @@ func (h *Handler) keyItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusMethodNotAllowed, errBody("method not allowed"))
+}
+
+// --- ip rules (persisted bans / allowlist) ---
+
+// ipRules lists persisted IP access rules (GET) and creates one (POST). These
+// are the durable counterpart to the automatic abuse bans that /api/stats/ip
+// reports; the proxy consults both before calling JEV, and an allow rule wins
+// over any ban. Mutations are audit-logged via logx — the console has a single
+// admin identity, so the actor is implicit. Loopback+bearer already gate it.
+func (h *Handler) ipRules(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		rules, err := h.store.ListIPRules()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
+			return
+		}
+		if rules == nil {
+			rules = []config.IPRule{}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": rules})
+	case http.MethodPost:
+		var in struct {
+			Pattern     string `json:"pattern"`
+			Kind        string `json:"kind"`
+			Reason      string `json:"reason"`
+			Permanent   bool   `json:"permanent"`
+			DurationSec int    `json:"duration_sec"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			writeJSON(w, http.StatusBadRequest, errBody("bad request"))
+			return
+		}
+		// A temporary block needs a positive duration; a permanent block and any
+		// allow rule carry no expiry.
+		var expiresAt *time.Time
+		if in.Kind == config.IPRuleBlock && !in.Permanent {
+			if in.DurationSec <= 0 {
+				writeJSON(w, http.StatusBadRequest, errBody("duration_sec must be positive for a temporary ban"))
+				return
+			}
+			t := time.Now().Add(time.Duration(in.DurationSec) * time.Second)
+			expiresAt = &t
+		}
+		rule, err := h.store.AddIPRule(strings.TrimSpace(in.Pattern), strings.TrimSpace(in.Kind), strings.TrimSpace(in.Reason), expiresAt)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, errBody(err.Error()))
+			return
+		}
+		exp := "permanent"
+		if rule.ExpiresAt != nil {
+			exp = rule.ExpiresAt.Format(time.RFC3339)
+		}
+		logx.Infof("ip-rule created: kind=%s pattern=%s expires=%s reason=%q", rule.Kind, rule.Pattern, exp, rule.Reason)
+		writeJSON(w, http.StatusOK, rule)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, errBody("method not allowed"))
+	}
+}
+
+// ipRuleItem handles DELETE /api/ip-rules/{id} (unban / remove allowlist entry).
+func (h *Handler) ipRuleItem(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeJSON(w, http.StatusMethodNotAllowed, errBody("method not allowed"))
+		return
+	}
+	id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/ip-rules/"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errBody("invalid id"))
+		return
+	}
+	if err := h.store.DeleteIPRule(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
+		return
+	}
+	logx.Infof("ip-rule deleted: id=%d", id)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // --- logs & stats ---

@@ -256,3 +256,19 @@ type IPStatsSummary struct {
 	TotalBlocked int64 `json:"total_blocked"`
 	TotalEvents  int64 `json:"total_events"`
 }
+
+// IPRule is one persisted IP access rule: a manual ban (temporary or permanent),
+// a CIDR block, or an allowlist entry. Unlike the in-memory abuse bans (package
+// internal/abuse, which reset on restart because they are automatic reactions),
+// these survive restarts because they are administrator intent. Matching is by
+// exact IP or CIDR containment; an allow rule wins over any block rule and over
+// an abuse ban, but never bypasses content filtering (see proxy.ServeHTTP).
+type IPRule struct {
+	ID        int64      `json:"id"`
+	Pattern   string     `json:"pattern"` // canonical single IP or CIDR, e.g. 1.2.3.4 or 10.0.0.0/8
+	IsCIDR    bool       `json:"is_cidr"`
+	Kind      string     `json:"kind"`                 // "block" | "allow"
+	ExpiresAt *time.Time `json:"expires_at,omitempty"` // nil = permanent (always nil for allow)
+	Reason    string     `json:"reason"`
+	CreatedAt time.Time  `json:"created_at"`
+}
