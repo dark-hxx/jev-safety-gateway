@@ -15,64 +15,82 @@
  *   `src/theme.ts` 挂载；`dark` 类在下方覆盖。
  * - 变量值是**空格分隔的 R G B 三元组**而不是颜色字面量：Tailwind 的 `<alpha-value>`
  *   需要这种形式才能让 `bg-secondary/15`、`border-hairline` 这类透明度修饰符正常工作。
- * - 两套调色板同一份 M3 色板（蓝主色 / 绿辅色 / 橙强调色）的深浅两档，
- *   语义对应关系不变：primary 是主色，secondary 表示「放行 / 安全」，error 表示「拦截」。
+ * - 浅色档取自 docs/prototype/white 的 Cupertino 系统色（System Blue / Green / Amber /
+ *   Red，画布 #F2F2F7、卡片 #FFFFFF），深色档沿用 M3 色板。
+ *   语义对应关系不变：primary 是主色，secondary 表示「放行 / 安全」，
+ *   tertiary 表示「降级 / 限流」，error 表示「拦截」。
+ *
+ * Cupertino 原值里有四处够不到控制台的对比度基线，浅色档按下述规则压深（深色档不受影响，
+ * 两档在「文字 / 底色」上保持同一水平）：
+ * - 原型正文灰 #6E6E73 在画布上只有 4.54:1，落到更深的容器底上更低，
+ *   故 on-surface-variant 取 #5F5F64（白底 6.35:1 / 画布 5.69:1）；outline 保留原型值。
+ * - 强调色 #007AFF 白底 4.02:1，叠上自身 10% 淡底后跌到 3.5:1，而深色档同位置是 7.7:1，
+ *   故 primary 改用原型自带的 apple-blue-hover #0062CC（白底 5.78:1 / 淡底 4.97:1）。
+ *   CTA 实底仍是原型按钮的 #007AFF（primary-container）——原型里只有它以白字压蓝底。
+ * - 放行绿 #248A3D 白底 4.39:1，落在 30% 绿底上只剩 3.43:1，
+ *   故 secondary 取 #1C7530（白底 5.85:1 / 放行徽标底 4.57:1）。
+ * - 琥珀文字 #C96F00 / #D96B00 白底只有 3.5–3.7:1，改取 #A05500（白底 5.49:1）；
+ *   tertiary-container 取 #FFD7A8，使 /30 淡底正好合成原型警戒徽标的 #FFF3E5。
+ * 拦截红 #D70015 与错误底 #FEECEB 与原型一致，未做调整。
+ * inverse-primary 是唯一保留 M3 取值的角色：它只用在登录页卡片背后的装饰光晕上，
+ * 取深色档主色可保住光晕的柔和度。
  */
 :root,
 .light {
-  --c-surface: 251 251 254;
-  --c-surface-dim: 218 217 224;
-  --c-surface-bright: 251 251 254;
+  --c-surface: 242 242 247;
+  --c-surface-dim: 229 229 234;
+  --c-surface-bright: 255 255 255;
   --c-surface-container-lowest: 255 255 255;
-  --c-surface-container-low: 245 244 250;
-  --c-surface-container: 239 237 244;
-  --c-surface-container-high: 233 231 239;
-  --c-surface-container-highest: 227 225 232;
-  --c-on-surface: 26 27 32;
-  --c-on-surface-variant: 68 70 79;
+  --c-surface-container-low: 245 245 247;
+  --c-surface-container: 255 255 255;
+  --c-surface-container-high: 245 245 247;
+  --c-surface-container-highest: 229 229 234;
+  /* 侧栏选中项 / 侧栏徽标底 / 顶栏状态丸：浅色下是「灰底上的白块」。这层语义 M3 里没有
+     对应角色，浅色档又不能继续借用 surface-container-high（它已与侧栏同为 #F5F5F7，
+     元素会直接消失），故单独补一个令牌；深色档沿用原来的 surface-container-high 取值。 */
+  --c-surface-raised: 255 255 255;
+  --c-on-surface: 29 29 31;
+  --c-on-surface-variant: 95 95 100;
   --c-inverse-surface: 47 48 51;
   --c-inverse-on-surface: 241 240 244;
-  /* M3 outline 原值（#74777F）只在纯 surface 上刚到 4.5:1；控制台里占多数的
-     小号 eyebrow / 降级标签其实落在更深的 surface-container 上，实测只有 3.7:1。
-     这里按容器底色压深一档，让浅色下的低强调文字与深色档的对比度处在同一水平。 */
-  --c-outline: 100 103 111;
-  --c-outline-variant: 196 198 208;
-  --c-surface-variant: 225 225 236;
-  --c-surface-tint: 0 90 193;
-  --c-primary: 0 90 193;
+  --c-outline: 110 110 115;
+  --c-outline-variant: 229 229 234;
+  --c-surface-variant: 229 229 234;
+  --c-surface-tint: 0 98 204;
+  --c-primary: 0 98 204;
   --c-on-primary: 255 255 255;
-  --c-primary-container: 216 226 255;
-  --c-on-primary-container: 0 26 65;
+  --c-primary-container: 0 122 255;
+  --c-on-primary-container: 255 255 255;
   --c-primary-fixed: 216 226 255;
   --c-primary-fixed-dim: 173 198 255;
   --c-on-primary-fixed: 0 26 65;
   --c-on-primary-fixed-variant: 0 68 147;
   --c-inverse-primary: 173 198 255;
-  --c-secondary: 0 110 28;
+  --c-secondary: 28 117 48;
   --c-on-secondary: 255 255 255;
-  --c-secondary-container: 111 220 124;
-  --c-on-secondary-container: 0 34 4;
+  --c-secondary-container: 52 199 89;
+  --c-on-secondary-container: 255 255 255;
   --c-secondary-fixed: 114 254 136;
   --c-secondary-fixed-dim: 83 225 111;
   --c-on-secondary-fixed: 0 33 7;
   --c-on-secondary-fixed-variant: 0 83 28;
-  --c-tertiary: 138 83 0;
+  --c-tertiary: 160 85 0;
   --c-on-tertiary: 255 255 255;
-  --c-tertiary-container: 255 220 191;
-  --c-on-tertiary-container: 45 22 0;
+  --c-tertiary-container: 255 215 168;
+  --c-on-tertiary-container: 65 34 0;
   --c-tertiary-fixed: 255 220 191;
   --c-tertiary-fixed-dim: 255 184 116;
   --c-on-tertiary-fixed: 45 22 0;
   --c-on-tertiary-fixed-variant: 106 59 0;
-  --c-error: 186 26 26;
+  --c-error: 215 0 21;
   --c-on-error: 255 255 255;
-  --c-error-container: 255 218 214;
-  --c-on-error-container: 65 0 2;
-  --c-background: 251 251 254;
-  --c-on-background: 26 27 32;
+  --c-error-container: 254 236 235;
+  --c-on-error-container: 147 0 10;
+  --c-background: 242 242 247;
+  --c-on-background: 29 29 31;
 
   /* 发丝边框：深色下是「白色提亮」，浅色下必须换成「黑色压暗」，否则边框会消失。 */
-  --hairline: rgba(0, 0, 0, 0.12);
+  --hairline: rgba(0, 0, 0, 0.08);
   --shadow-overlay: 0 12px 32px -4px rgb(0 0 0 / 0.16);
   --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.9);
 }
@@ -86,6 +104,9 @@
   --c-surface-container: 30 31 35;
   --c-surface-container-high: 41 42 46;
   --c-surface-container-highest: 52 53 57;
+  /* 深色档里「灰底上的提亮块」本来就是 surface-container-high（#292A2E），
+     取值刻意与它一致，让这次浅色重构不改变深色的渲染结果。 */
+  --c-surface-raised: 41 42 46;
   --c-on-surface: 227 226 231;
   --c-on-surface-variant: 193 198 215;
   --c-inverse-surface: 227 226 231;

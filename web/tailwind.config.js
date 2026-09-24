@@ -89,6 +89,9 @@ export default {
         'surface-container': token('surface-container'),
         'surface-container-high': token('surface-container-high'),
         'surface-container-highest': token('surface-container-highest'),
+        // 灰底之上的「提亮块」（侧栏选中项 / 侧栏徽标底 / 顶栏状态丸）：M3 色板里没有
+        // 对应角色，深浅两档取值见 style.css —— 浅色下是白，深色下等于 surface-container-high。
+        'surface-raised': token('surface-raised'),
         'on-surface': token('on-surface'),
         'on-surface-variant': token('on-surface-variant'),
         'inverse-surface': token('inverse-surface'),

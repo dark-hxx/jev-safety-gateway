@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Icon from '../../components/Icon.vue'
+import HintTip from '../../components/HintTip.vue'
 import NotConnected from '../../components/NotConnected.vue'
 import * as api from '../../api'
 import { useConsole } from '../../console'
@@ -175,9 +176,6 @@ const latencyCaption = computed(() => {
                 {{ t('dash.adminHost', { host: adminHost }) }}
               </span>
             </div>
-            <p class="text-subheadline font-subheadline text-on-surface-variant mt-0.5">
-              {{ t('dash.subtitle') }}
-            </p>
           </div>
         </div>
 
@@ -186,12 +184,10 @@ const latencyCaption = computed(() => {
           <div class="flex flex-col px-space-xs gap-0.5">
             <span class="eyebrow">{{ t('dash.forwarded', { range: rangeText }) }}</span>
             <span class="text-headline font-headline text-on-surface mono">{{ num(stats.total) }}</span>
-            <span class="text-caption-1 font-caption-1 text-outline">{{ t('dash.fromStats') }}</span>
           </div>
           <div class="flex flex-col px-space-xs gap-0.5">
             <span class="eyebrow">{{ t('dash.peakPps') }}</span>
             <NotConnected :reason="t('dash.peakPpsReason')" />
-            <span class="text-caption-1 font-caption-1 text-outline">{{ t('dash.needMetric') }}</span>
           </div>
           <div class="flex flex-col px-space-xs gap-0.5">
             <span class="eyebrow">{{ t('dash.gwState') }}</span>
@@ -227,7 +223,6 @@ const latencyCaption = computed(() => {
           <div class="text-title-2 font-title-2 text-on-surface tracking-tight mono">{{ num(stats.total) }}</div>
           <div class="mt-0.5"><NotConnected :reason="t('dash.card.totalReason')" /></div>
         </div>
-        <div class="text-caption-2 font-caption-2 text-outline">{{ t('dash.card.totalFoot') }}</div>
       </div>
 
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
@@ -264,7 +259,6 @@ const latencyCaption = computed(() => {
             }) }}
           </div>
         </div>
-        <div class="text-caption-2 font-caption-2 text-outline">{{ t('dash.card.blockedFoot') }}</div>
       </div>
 
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
@@ -317,7 +311,10 @@ const latencyCaption = computed(() => {
           </template>
           <NotConnected v-else :reason="t('dash.card.latencyReason')" />
         </div>
-        <div class="text-caption-2 font-caption-2 text-outline">{{ latencyCaption }}</div>
+        <div class="flex items-center gap-1.5 text-caption-2 font-caption-2 text-outline">
+          <span>{{ latencyCaption }}</span>
+          <HintTip v-if="latency?.sampled" :text="t('dash.latencySampledTip')" />
+        </div>
       </div>
     </section>
 
@@ -391,18 +388,15 @@ const latencyCaption = computed(() => {
           <Icon name="donut" class="text-outline text-[20px]" />
         </div>
         <ScoreDistribution :counts="scoreBuckets" :unscored="unscored" :loaded="loaded" />
-        <div class="flex flex-col gap-space-sm pt-space-xs">
-          <div class="flex items-center justify-between text-caption-1 font-caption-1 text-on-surface-variant">
-            <span>{{ t('dash.scoreLink') }}</span>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 text-primary hover:underline"
-              @click="router.push({ name: 'audit' })"
-            >
-              {{ t('dash.viewAudit') }}
-              <Icon name="chevron-right" class="text-[14px]" />
-            </button>
-          </div>
+        <div class="flex items-center justify-end pt-space-xs">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 text-caption-1 font-caption-1 text-primary hover:underline"
+            @click="router.push({ name: 'audit' })"
+          >
+            {{ t('dash.viewAudit') }}
+            <Icon name="chevron-right" class="text-[14px]" />
+          </button>
         </div>
       </div>
     </section>
@@ -480,7 +474,6 @@ const latencyCaption = computed(() => {
             </div>
             <div class="flex flex-col">
               <span class="text-headline font-headline text-on-surface">{{ t('dash.ctaSettings') }}</span>
-              <span class="text-caption-1 font-caption-1 text-outline">{{ t('dash.ctaSettingsSub') }}</span>
             </div>
           </div>
           <div class="flex items-center gap-1 text-on-surface-variant group-hover:text-primary transition-colors">
@@ -500,7 +493,6 @@ const latencyCaption = computed(() => {
             </div>
             <div class="flex flex-col">
               <span class="text-headline font-headline text-on-surface">{{ t('dash.ctaAudit') }}</span>
-              <span class="text-caption-1 font-caption-1 text-outline">{{ t('dash.ctaAuditSub') }}</span>
             </div>
           </div>
           <div class="flex items-center gap-1 text-on-surface-variant group-hover:text-secondary transition-colors">

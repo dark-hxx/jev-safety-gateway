@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import HintTip from './HintTip.vue'
 import Icon from './Icon.vue'
 import { useI18n } from '../i18n'
 
@@ -11,6 +12,9 @@ import { useI18n } from '../i18n'
  * - `placeholder`：占位块，保留原型中该区域的形状与尺寸，但不绘制任何无来源数值。
  *
  * 两者都**不显示任何数值**，只说明缺口与后续计划。
+ *
+ * 缺口说明（`reason`）两种形态下一律走悬浮气泡，不占用页面正文：默认视图只留
+ * 「未接入」这个短徽标，想知道「为什么没有数据」再悬停展开。
  *
  * `title` / `reason` 由调用方按当前界面语言传入（`t(...)`）；缺省时的兜底文案同样走文案表，
  * 因此这里不放任何字面量。
@@ -50,8 +54,6 @@ const tip = computed(() => props.reason || t('notconnected.tip'))
     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary-container/20 text-tertiary text-code-badge font-code-badge">
       {{ label }}
     </span>
-    <span v-if="reason" class="text-caption-2 font-caption-2 text-outline max-w-md leading-relaxed">
-      {{ reason }}
-    </span>
+    <HintTip :text="tip" />
   </div>
 </template>

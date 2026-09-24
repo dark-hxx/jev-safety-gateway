@@ -35,7 +35,7 @@ const { t, localized } = useI18n()
 
 const linkClass =
   'w-full text-left flex items-center gap-space-sm px-space-sm py-2 rounded-lg transition-all'
-const linkActiveClass = `${linkClass} bg-surface-container-high text-on-surface font-semibold shadow-sm`
+const linkActiveClass = `${linkClass} bg-surface-raised text-on-surface font-semibold shadow-sm`
 const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-surface-variant hover:bg-surface-container hover:text-on-surface`
 </script>
 
@@ -48,7 +48,7 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
       <div class="flex flex-col gap-space-md">
         <div class="px-space-md flex items-center gap-space-sm">
           <!-- 原型此处引用公网图片资源，离线约束下改为本地内联图标标记 -->
-          <div class="h-8 w-8 rounded-lg bg-surface-container-high flex items-center justify-center text-primary shadow-sm">
+          <div class="h-8 w-8 rounded-lg bg-surface-raised flex items-center justify-center text-primary shadow-sm">
             <Icon name="shield-check" class="text-[18px]" />
           </div>
           <div class="flex flex-col">
@@ -76,7 +76,7 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
       </div>
 
       <div class="px-space-md flex flex-col gap-space-sm">
-        <div class="p-space-sm rounded-xl bg-surface-container-high flex flex-col gap-space-xs">
+        <div class="p-space-sm rounded-xl bg-surface-raised flex flex-col gap-space-xs">
           <div class="flex items-center justify-between text-caption-2 font-caption-2 text-on-surface-variant">
             <span>{{ t('shell.jevModel') }}</span>
             <span class="font-code-badge text-code-badge text-primary truncate max-w-[7rem]" :title="jevModel">
@@ -106,7 +106,7 @@ const linkIdleClass = `${linkClass} text-subheadline font-subheadline text-on-su
       <header class="fixed top-0 left-64 right-0 h-16 z-40 material-bar">
         <div class="h-16 w-full px-space-md flex items-center justify-between gap-space-md">
           <div class="flex items-center gap-space-md min-w-max">
-            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-high">
+            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised">
               <span
                 class="h-2 w-2 rounded-full"
                 :class="enabled ? 'bg-secondary animate-pulse' : 'bg-outline'"

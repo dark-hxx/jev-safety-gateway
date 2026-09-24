@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import HintTip from '../../components/HintTip.vue'
 import { num } from '../../format'
 import { useI18n } from '../../i18n'
 
@@ -94,8 +95,9 @@ const unscoredShare = computed(() =>
         </div>
       </div>
 
-      <div class="text-caption-2 font-caption-2 text-outline leading-relaxed">
-        {{ t('score.sample', { n: num(sample) }) }}
+      <div class="flex items-center gap-1.5 text-caption-2 font-caption-2 text-outline">
+        <span>{{ t('score.sample', { n: num(sample) }) }}</span>
+        <HintTip :text="t('score.sampleTip')" />
       </div>
     </div>
   </div>

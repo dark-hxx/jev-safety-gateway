@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Icon from '../../components/Icon.vue'
+import HintTip from '../../components/HintTip.vue'
 import NotConnected from '../../components/NotConnected.vue'
 import * as api from '../../api'
 import { useConsole } from '../../console'
@@ -154,6 +155,14 @@ async function removeKey(k: JEVKey): Promise<void> {
 
 const keysEnabled = computed(() => keyPool.value.filter((k) => k.enabled).length)
 const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls || 0), 0))
+
+/**
+ * 当前开关下的拦截方向，一句话。阈值字段的短提示与 ⓘ 全文共用它，
+ * 因此「页面上看到的那句」与「气泡里展开的那句」永远是同一个结论。
+ */
+const blockRule = computed(() =>
+  form.value.block_if_below ? t('settings.semanticsBelow') : t('settings.semanticsAbove'),
+)
 </script>
 
 <template>
@@ -202,16 +211,9 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
       <span class="text-subheadline font-subheadline">{{ saveError || saveOk }}</span>
     </div>
 
-    <!-- 语义提示：阈值方向由 block_if_below 决定 -->
-    <div class="flex items-start gap-2 px-space-md py-2.5 rounded-xl bg-surface-container border border-hairline">
-      <Icon name="info" class="text-primary text-[16px] mt-0.5 shrink-0" />
-      <span class="text-caption-1 font-caption-1 text-on-surface-variant leading-relaxed">
-        <!-- 插值行内代码片必须与相邻插值同处一行：换行会被 Vue 的空白压缩吃掉。
-             片段之间的空格属于**该语言的排版**（中文「，因此」后面不要空格，英文「, so 」后面要），
-             因此把它写在文案表里，而不是让模板替两种语言做同一个决定。 -->
-        {{ t('settings.semanticsPre') }} <span class="font-code-badge text-code-badge text-primary mono">block_if_below = {{ form.block_if_below }}</span>{{ t('settings.semanticsMid') }}<span class="text-on-surface">{{ form.block_if_below ? t('settings.semanticsBelow') : t('settings.semanticsAbove') }}</span>{{ t('settings.semanticsTail') }}
-      </span>
-    </div>
+    <!-- 语义提示：阈值方向由 block_if_below 决定。
+         结论（哪一侧算拦截）留在阈值那一行的短提示里，完整推导收进 ⓘ——
+         单独占一行的横幅把它放大成了页面级信息，而它其实只是这一个字段的注解。 -->
 
     <!-- 分组 1：上游服务与 JEV 检定路由 -->
     <section class="flex flex-col rounded-2xl bg-surface-container shadow-lg border border-hairline overflow-hidden">
@@ -227,7 +229,10 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
 
       <div class="px-space-lg py-space-md grid grid-cols-1 lg:grid-cols-2 gap-space-md">
         <label class="flex flex-col gap-1.5 lg:col-span-1">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.upstream') }}</span>
+          <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+            {{ t('settings.upstream') }}
+            <HintTip :text="t('settings.upstreamTip')" />
+          </span>
           <input
             v-model.trim="form.upstream_base_url"
             type="text"
@@ -235,11 +240,13 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
             class="w-full px-3 py-2.5 rounded-xl bg-surface-container-high text-on-surface font-code-body text-code-body focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
             placeholder="https://api.example.com"
           />
-          <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.upstreamHint') }}</span>
         </label>
 
         <label class="flex flex-col gap-1.5 lg:col-span-1">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.jevUrl') }}</span>
+          <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+            {{ t('settings.jevUrl') }}
+            <HintTip :text="t('settings.jevUrlTip')" />
+          </span>
           <input
             v-model.trim="form.jev_base_url"
             type="text"
@@ -247,11 +254,13 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
             class="w-full px-3 py-2.5 rounded-xl bg-surface-container-high text-on-surface font-code-body text-code-body focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
             placeholder="https://jev.example.com"
           />
-          <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.jevUrlHint') }} <span class="mono">/v1/systemone</span>{{ t('settings.jevUrlHintTail') }}</span>
         </label>
 
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.jevModel') }}</span>
+          <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+            {{ t('settings.jevModel') }}
+            <HintTip :text="t('settings.jevModelTip')" />
+          </span>
           <input
             v-model.trim="form.jev_model"
             type="text"
@@ -259,12 +268,17 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
             class="w-full px-3 py-2.5 rounded-xl bg-surface-container-high text-on-surface font-code-body text-code-body focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset"
             placeholder="jev-latest"
           />
-          <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.jevModelHint') }} <span class="mono">jev-latest</span>{{ t('settings.jevModelHintTail') }}</span>
+          <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.jevModelHint') }}</span>
         </label>
 
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between">
-            <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.threshold') }}</span>
+            <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+              {{ t('settings.threshold') }}
+              <HintTip
+                :text="t('settings.semanticsTip', { v: String(form.block_if_below), rule: blockRule })"
+              />
+            </span>
             <span
               class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge"
               :class="thresholdValid ? 'bg-primary/15 text-primary' : 'bg-error-container text-error'"
@@ -292,25 +306,28 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
             />
           </div>
           <span class="text-caption-2 font-caption-2" :class="thresholdValid ? 'text-outline' : 'text-error'">
-            {{ t('settings.thresholdHint') }}
+            {{ t('settings.thresholdHint') }} · {{ blockRule }}
           </span>
         </div>
 
         <label class="flex flex-col gap-1.5 lg:col-span-2">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.instruction') }}</span>
+          <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+            {{ t('settings.instruction') }}
+            <HintTip :text="t('settings.instructionTip')" />
+          </span>
           <textarea
             v-model="form.safety_instruction"
             rows="4"
             spellcheck="false"
             class="w-full px-3 py-2.5 rounded-xl bg-surface-container-high text-on-surface font-code-body text-code-body leading-relaxed focus:outline-none focus:bg-surface-container-highest transition-colors shadow-inset resize-y"
           ></textarea>
-          <span class="text-caption-2 font-caption-2 text-outline">
-            {{ t('settings.instructionHint') }}
-          </span>
         </label>
 
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.maxChars') }}</span>
+          <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+            {{ t('settings.maxChars') }}
+            <HintTip :text="t('settings.maxCharsTip')" />
+          </span>
           <input
             v-model.number="form.max_state_chars"
             type="number"
@@ -321,7 +338,10 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
         </label>
 
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.timeout') }}</span>
+          <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+            {{ t('settings.timeout') }}
+            <HintTip :text="t('settings.timeoutTip')" />
+          </span>
           <input
             v-model.number="form.jev_timeout_ms"
             type="number"
@@ -334,21 +354,30 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
         <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
           <input v-model="form.record_snippet" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary" />
           <span class="flex flex-col gap-0.5">
-            <span class="text-subheadline font-subheadline text-on-surface">{{ t('settings.recordSnippet') }}</span>
-            <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.recordSnippetHintPre') }}<span class="mono">JEV_DEBUG</span>{{ t('settings.recordSnippetHintPost') }}</span>
+            <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+              {{ t('settings.recordSnippet') }}
+              <HintTip :text="t('settings.recordSnippetTip')" />
+            </span>
+            <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.recordSnippetHint') }}</span>
           </span>
         </label>
 
         <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
           <input v-model="form.dedup_enabled" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary" />
           <span class="flex flex-col gap-0.5">
-            <span class="text-subheadline font-subheadline text-on-surface">{{ t('settings.dedup') }}</span>
+            <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+              {{ t('settings.dedup') }}
+              <HintTip :text="t('settings.dedupTip')" />
+            </span>
             <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.dedupHint') }}</span>
           </span>
         </label>
 
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.dedupWindow') }}</span>
+          <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+            {{ t('settings.dedupWindow') }}
+            <HintTip :text="t('settings.dedupWindowTip')" />
+          </span>
           <input
             v-model.number="form.dedup_window_sec"
             type="number"
@@ -384,7 +413,10 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
       <div class="px-space-lg py-space-md flex flex-col gap-space-md">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-space-md">
           <label class="flex flex-col gap-1.5">
-            <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.abuseWindow') }}</span>
+            <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+              {{ t('settings.abuseWindow') }}
+              <HintTip :text="t('settings.abuseWindowTip')" />
+            </span>
             <input
               v-model.number="form.abuse_window_sec"
               type="number"
@@ -396,7 +428,10 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
           </label>
 
           <label class="flex flex-col gap-1.5">
-            <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.abuseMax') }}</span>
+            <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+              {{ t('settings.abuseMax') }}
+              <HintTip :text="t('settings.abuseMaxTip')" />
+            </span>
             <input
               v-model.number="form.abuse_max_harmful"
               type="number"
@@ -408,7 +443,10 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
           </label>
 
           <div class="flex flex-col gap-1.5">
-            <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.banSec') }}</span>
+            <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+              {{ t('settings.banSec') }}
+              <HintTip :text="t('settings.banPresetsTip')" />
+            </span>
             <input
               v-model.number="form.abuse_ban_sec"
               type="number"
@@ -431,14 +469,19 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
                 {{ t('settings.banNow', { v: durationOf(form.abuse_ban_sec || 0) }) }}
               </span>
             </div>
-            <span class="text-caption-2 font-caption-2 text-outline">
-              <NotConnected :reason="t('settings.banNoPermanent')" /> {{ t('settings.banPresetsHint') }}
-            </span>
+            <!-- 缺口说明收进徽标的悬浮提示，不再作为正文夹在短提示前面 -->
+            <div class="flex items-center gap-space-xs">
+              <NotConnected :reason="t('settings.banNoPermanent')" />
+              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.banPresetsHint') }}</span>
+            </div>
           </div>
         </div>
 
         <label class="flex flex-col gap-1.5">
-          <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.blockMessage') }}</span>
+          <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+            {{ t('settings.blockMessage') }}
+            <HintTip :text="t('settings.blockMessageTip')" />
+          </span>
           <textarea
             v-model="form.block_message"
             rows="3"
@@ -449,7 +492,10 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
 
         <div class="flex flex-col gap-space-sm p-space-md rounded-xl bg-surface-container-low/70 shadow-inset">
           <div class="flex items-center justify-between flex-wrap gap-space-xs">
-            <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('settings.statusCodes') }}</span>
+            <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+              {{ t('settings.statusCodes') }}
+              <HintTip :text="t('settings.statusCodesTip')" />
+            </span>
             <div class="flex items-center gap-space-md text-caption-1 font-caption-1">
               <span class="flex items-center gap-1.5">
                 <span class="px-1.5 py-0.5 rounded bg-error-container text-error font-code-badge text-code-badge mono">403</span>
@@ -461,41 +507,49 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
               </span>
             </div>
           </div>
-          <span class="text-caption-2 font-caption-2 text-outline">
-            {{ t('settings.statusCodesHint') }}
-          </span>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm">
           <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
             <input v-model="form.check_response" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary" />
             <span class="flex flex-col gap-0.5">
-              <span class="text-subheadline font-subheadline text-on-surface">{{ t('settings.checkResponse') }}</span>
-              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.checkResponseHintPre') }}<span class="text-tertiary">{{ t('settings.checkResponseHintWarn') }}</span>{{ t('settings.checkResponseHintPost') }}</span>
+              <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+                {{ t('settings.checkResponse') }}
+                <HintTip :text="t('settings.checkResponseTip')" />
+              </span>
+              <span class="text-caption-2 font-caption-2 text-tertiary">{{ t('settings.checkResponseHint') }}</span>
             </span>
           </label>
 
+          <!-- 结论已在阈值的短提示里，这里不再重复一遍；完整说明留在 ⓘ -->
           <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
             <input v-model="form.block_if_below" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary" />
             <span class="flex flex-col gap-0.5">
-              <span class="text-subheadline font-subheadline text-on-surface">{{ t('settings.blockIfBelow') }}</span>
-              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.blockIfBelowHint') }}</span>
+              <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+                {{ t('settings.blockIfBelow') }}
+                <HintTip :text="t('settings.blockIfBelowTip')" />
+              </span>
             </span>
           </label>
 
           <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
             <input v-model="form.fail_open" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary" />
             <span class="flex flex-col gap-0.5">
-              <span class="text-subheadline font-subheadline text-on-surface">{{ t('settings.failOpen') }}</span>
-              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.failOpenHint') }}</span>
+              <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+                {{ t('settings.failOpen') }}
+                <HintTip :text="t('settings.failOpenTip')" />
+              </span>
             </span>
           </label>
 
           <label class="flex items-start gap-space-sm p-space-sm rounded-xl bg-surface-container-low/70 cursor-pointer">
             <input v-model="form.reject_oversize_body" type="checkbox" class="mt-0.5 h-4 w-4 accent-primary" />
             <span class="flex flex-col gap-0.5">
-              <span class="text-subheadline font-subheadline text-on-surface">{{ t('settings.rejectOversize') }}</span>
-              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.rejectOversizeHintPre') }}<span class="mono">413</span>{{ t('settings.rejectOversizeHintPost') }}</span>
+              <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+                {{ t('settings.rejectOversize') }}
+                <HintTip :text="t('settings.rejectOversizeTip')" />
+              </span>
+              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.rejectOversizeHint') }}</span>
             </span>
           </label>
         </div>
@@ -631,14 +685,12 @@ const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls ||
           </div>
         </div>
 
-        <div class="flex flex-col gap-space-xs p-space-md rounded-xl border border-dashed border-outline-variant/60">
-          <div class="flex items-center justify-between flex-wrap gap-space-xs">
-            <span class="text-subheadline font-subheadline text-on-surface">{{ t('settings.compliance') }}</span>
-            <NotConnected :reason="t('settings.complianceReason')" />
-          </div>
-          <span class="text-caption-2 font-caption-2 text-outline">
-            {{ t('settings.complianceFoot') }}
+        <div class="flex items-center justify-between flex-wrap gap-space-xs p-space-md rounded-xl border border-dashed border-outline-variant/60">
+          <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+            {{ t('settings.compliance') }}
+            <HintTip :text="t('settings.complianceFoot')" />
           </span>
+          <NotConnected :reason="t('settings.complianceReason')" />
         </div>
       </div>
     </section>
