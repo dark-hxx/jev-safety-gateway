@@ -1,6 +1,7 @@
 name: Release
 
-# 打 tag 即出全平台产物；workflow_dispatch 用于在分支上试打包（不会建 Release）。
+# Tag push publishes all-platform artifacts; workflow_dispatch packages a branch without
+# creating a Release.
 on:
   push:
     tags: ['v*']
@@ -8,10 +9,11 @@ on:
 
 permissions:
   contents: write   # gh release create
-  packages: write   # 推 ghcr.io 镜像
+  packages: write   # push ghcr.io image
 
 jobs:
-  # 版本号只在这里算一次，三个产物共用，避免各平台算出不同结果。
+  # Version is resolved once here and shared by all three artifacts, so no platform can
+  # disagree about what it built.
   identity:
     runs-on: ubuntu-latest
     outputs:
@@ -25,11 +27,11 @@ jobs:
           fetch-depth: 0
 
       - id: id
-        name: 推导版本号
+        name: Resolve version
         run: |
           set -euo pipefail
-          # 版本真源是 web/package.json（与 scripts/build-local-test.ps1 一致）；
-          # 仓库没有 tag 的习惯时它是唯一的版本来源。tag 推送则以 tag 为准。
+          # web/package.json is the single source of truth (same as scripts/build-local-test.ps1);
+          # a v* tag wins over it.
           base="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' web/package.json | head -n1)"
           base="${base:-0.0.0}"
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
@@ -41,9 +43,9 @@ jobs:
             echo "version=$version"
             echo "commit=$(git rev-parse --short HEAD)"
             echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            # ghcr.io 只接受全小写路径，而 github.repository 保留原大小写
-            # （owner 叫 Alice 就是 Alice/jev）。直接拼会把镜像推到一个不存在
-            # 的仓库并在 push 阶段被 registry 拒绝，所以统一转小写。
+            # ghcr.io only accepts lowercase paths but github.repository keeps its case
+            # (owner "Alice" yields "Alice/jev"), which would point at a nonexistent repo
+            # and get rejected at push time. Lowercase it.
             echo "image=ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           } >> "$GITHUB_OUTPUT"
           echo "version=$version"
@@ -66,7 +68,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: 构建
+      - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -79,7 +81,7 @@ jobs:
             -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
             -o "dist/jev-safety-gateway${{ matrix.ext }}" ./cmd/jev-safety-gateway
 
-      - name: 组装发布包
+      - name: Package
         env:
           VERSION: ${{ needs.identity.outputs.version }}
         run: |
@@ -88,7 +90,8 @@ jobs:
           mkdir -p "dist/${pkg}"
           mv "dist/jev-safety-gateway${{ matrix.ext }}" "dist/${pkg}/"
 
-          # 部署文档随包分发：包里就带升级与备份注意事项，不必回头翻仓库。
+          # Ship the deployment doc inside the archive so the upgrade and backup notes
+          # travel with the binary instead of having to be looked up in the repo.
           cp docs/deployment.md "dist/${pkg}/" 2>/dev/null || true
 
           if [ "${{ matrix.goos }}" = linux ]; then
@@ -146,8 +149,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # .git 不在构建上下文里，镜像内的构建标识只能这样传进去；
-          # VERSION 显式传，免得 Dockerfile 退回从 web/package.json 自解析。
+          # .git is excluded from the build context, so the build identity inside the image
+          # can only arrive this way; VERSION is passed explicitly so the Dockerfile does not
+          # fall back to parsing web/package.json itself.
           build-args: |
             VERSION=${{ needs.identity.outputs.version }}
             COMMIT=${{ needs.identity.outputs.commit }}
@@ -164,8 +168,15 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+          # Without name/pattern this means "download every artifact of the run". The image
+          # job's docker/build-push-action also uploads a build record (DOCKER_BUILD_RECORD_UPLOAD
+          # defaults to true, named <owner>~<repo>~<id>.dockerbuild): it is gzip, not zip, so
+          # download-artifact cannot extract it and the whole step dies after 5 retries, taking
+          # the three platform packages down with it. actions/toolkit#1874 is still unmerged,
+          # so exclude it as the docker README advises.
+          pattern: "!*.dockerbuild"
 
-      - name: 建 Release
+      - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.identity.outputs.version }}
