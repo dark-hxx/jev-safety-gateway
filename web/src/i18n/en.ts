@@ -15,6 +15,11 @@ export const en: Record<MessageKey, string> = {
   'title.setup': 'Initial setup · JEV Safety Gateway',
   'boot.connecting': 'Connecting to the admin service…',
 
+  // --- Global confirm dialog (hand-rolled, replaces window.confirm) ---
+  // Only "cancel" lives here: the confirm label is supplied per call site and
+  // names the action, so there is no generic label to fall back to.
+  'dialog.cancel': 'Cancel',
+
   // --- Appearance preferences ---
   'pref.theme': 'Theme',
   'pref.theme.system': 'System',
@@ -369,6 +374,7 @@ export const en: Record<MessageKey, string> = {
   'settings.addKey': 'Add to pool',
   'settings.addKeyError': 'Enter the key value',
   'settings.unnamedKey': 'Unnamed key',
+  'settings.deleteKeyTitle': 'Delete key',
   'settings.deleteKeyConfirm': 'Delete the key "{label}"? This cannot be undone.',
   'settings.keyCalls': '{n} calls',
   'settings.keyOkErr': '{ok} ok · {err} failed',
@@ -478,9 +484,11 @@ export const en: Record<MessageKey, string> = {
   'ipa.manage.remain': '{v} left',
   'ipa.manage.expired': 'Expired',
   'ipa.manage.delete': 'Delete',
+  'ipa.manage.deleteTitle': 'Delete rule',
   'ipa.manage.deleteConfirm': 'Delete rule "{pattern}"? This takes effect immediately.',
   'ipa.manage.empty': 'No custom rules yet',
   'ipa.manage.emptyHint': 'Ban and allow-list rules appear here once added; automatic abuse bans are not listed.',
   'ipa.action.ban': 'Ban',
+  'ipa.action.banTitle': 'Ban source IP',
   'ipa.action.banConfirm': 'Add source {ip} to the ban rules? Bans for 1 hour by default — adjust or remove it in the rule pool below.',
 }

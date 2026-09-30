@@ -7,6 +7,7 @@ import NotConnected from '../../components/NotConnected.vue'
 import SelectMenu from '../../components/SelectMenu.vue'
 import WorldThreatMap from '../../components/WorldThreatMap.vue'
 import * as api from '../../api'
+import { confirmDialog } from '../../confirm'
 import { durationOf, num, pctText, relativeOf, score } from '../../format'
 import { useI18n } from '../../i18n'
 import type { MessageKey } from '../../i18n/zh'
@@ -309,7 +310,15 @@ async function addRule(): Promise<void> {
 }
 
 async function removeRule(rule: IPRule): Promise<void> {
-  if (!window.confirm(t('ipa.manage.deleteConfirm', { pattern: rule.pattern }))) return
+  if (
+    !(await confirmDialog({
+      title: t('ipa.manage.deleteTitle'),
+      message: t('ipa.manage.deleteConfirm', { pattern: rule.pattern }),
+      confirmText: t('ipa.manage.delete'),
+      danger: true,
+    }))
+  )
+    return
   rulesError.value = ''
   try {
     await api.deleteIpRule(rule.id)
@@ -321,7 +330,15 @@ async function removeRule(rule: IPRule): Promise<void> {
 
 /** 从排行表一键手动封禁：默认 1 小时临时封禁，随后刷新规则池与统计。 */
 async function banIp(ip: string): Promise<void> {
-  if (!window.confirm(t('ipa.action.banConfirm', { ip }))) return
+  if (
+    !(await confirmDialog({
+      title: t('ipa.action.banTitle'),
+      message: t('ipa.action.banConfirm', { ip }),
+      confirmText: t('ipa.action.ban'),
+      danger: true,
+    }))
+  )
+    return
   rulesError.value = ''
   try {
     await api.addIpRule({ pattern: ip, kind: 'block', reason: t('ipa.action.ban'), permanent: false, duration_sec: 3600 })

@@ -18,6 +18,10 @@ export const zh = {
   'title.setup': '初始配置 · JEV Safety Gateway',
   'boot.connecting': '正在连接管理服务…',
 
+  // --- 全局确认弹框（自绘，替代 window.confirm）---
+  // 只有「取消」进表：确认按钮的文案由调用点按具体动作给出（见 confirm.ts）。
+  'dialog.cancel': '取消',
+
   // --- 顶栏外观偏好 ---
   'pref.theme': '主题',
   'pref.theme.system': '跟随系统',
@@ -374,6 +378,7 @@ export const zh = {
   'settings.addKey': '添加入池',
   'settings.addKeyError': '请填写密钥内容',
   'settings.unnamedKey': '未命名密钥',
+  'settings.deleteKeyTitle': '删除密钥',
   'settings.deleteKeyConfirm': '确认删除密钥「{label}」？该操作不可撤销。',
   'settings.keyCalls': '{n} 次',
   'settings.keyOkErr': '成功 {ok} · 失败 {err}',
@@ -483,10 +488,12 @@ export const zh = {
   'ipa.manage.remain': '剩余 {v}',
   'ipa.manage.expired': '已过期',
   'ipa.manage.delete': '删除',
+  'ipa.manage.deleteTitle': '删除规则',
   'ipa.manage.deleteConfirm': '确认删除规则「{pattern}」？该操作立即生效。',
   'ipa.manage.empty': '暂无自定义规则',
   'ipa.manage.emptyHint': '添加封禁或白名单规则后显示在这里；abuse 自动封禁不在此列。',
   'ipa.action.ban': '封禁',
+  'ipa.action.banTitle': '封禁来源 IP',
   'ipa.action.banConfirm': '将来源 {ip} 加入封禁规则？默认封禁 1 小时，可在下方规则池调整或删除。',
 } as const
 

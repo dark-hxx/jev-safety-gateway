@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import AppShell from './components/AppShell.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import LoginView from './components/LoginView.vue'
 import * as api from './api'
 import { provideConsole } from './console'
@@ -165,4 +166,8 @@ provideConsole({
   >
     <RouterView />
   </AppShell>
+
+  <!-- 确认弹框宿主：全局唯一一个，由 confirmDialog() 驱动；挂在这里而不是各页面内，
+       是为了让任何位置的调用都用同一个弹框，且不受页面容器的层级与裁剪影响。 -->
+  <ConfirmDialog />
 </template>

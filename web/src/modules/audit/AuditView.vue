@@ -5,6 +5,7 @@ import Icon from '../../components/Icon.vue'
 import NotConnected from '../../components/NotConnected.vue'
 import SelectMenu from '../../components/SelectMenu.vue'
 import * as api from '../../api'
+import { confirmDialog } from '../../confirm'
 import { useConsole } from '../../console'
 import { clockOf, dateTimeOf, decisionStyle, methodClass, num, score, scoreWidth } from '../../format'
 import { useI18n } from '../../i18n'
@@ -287,7 +288,15 @@ function flashAction(text: string, ok: boolean): void {
 async function banIp(ip: string): Promise<void> {
   const target = ip.trim()
   if (!target) return
-  if (!window.confirm(t('audit.action.banConfirm', { ip: target }))) return
+  if (
+    !(await confirmDialog({
+      title: t('audit.action.ban', { ip: target }),
+      message: t('audit.action.banConfirm', { ip: target }),
+      confirmText: t('audit.action.banButton'),
+      danger: true,
+    }))
+  )
+    return
   actionMsg.value = null
   try {
     await api.addIpRule({
@@ -631,7 +640,7 @@ onBeforeUnmount(() => {
         v-if="selected"
         class="fixed top-16 right-0 bottom-0 w-[420px] max-w-full z-40 bg-surface-container-low border-l border-hairline shadow-overlay flex flex-col"
       >
-        <div class="px-space-md py-space-sm border-b border-hairline flex items-center justify-between gap-space-sm">
+        <div class="shrink-0 px-space-md py-space-sm border-b border-hairline flex items-center justify-between gap-space-sm">
           <div class="flex items-center gap-space-xs min-w-0">
             <Icon name="search-check" class="text-primary text-[18px] shrink-0" />
             <div class="flex flex-col min-w-0">
@@ -649,9 +658,14 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="flex-1 overflow-auto px-space-md py-space-md flex flex-col gap-space-md">
+        <!-- 唯一可滚动的区域。`min-h-0` 不能省：纵向 flex 子项的自动最小尺寸默认为
+             内容高度，没有它这一层就不会收缩，滚动条也就不会出现。
+             与它配套的是每个子项上的 `shrink-0`——否则撑不下的那部分会被子项自己
+             压缩掉（「已持久化字段」块带 overflow-hidden，会把自己裁到只剩几行，
+             而被裁掉的行既看不见也滚不到，正是「字段加载不完整」的来源）。 -->
+        <div class="flex-1 min-h-0 overflow-auto px-space-md py-space-md flex flex-col gap-space-md">
           <!-- 判定结论 -->
-          <div class="flex items-center justify-between p-space-sm rounded-xl" :class="decisionStyle(selected.decision).badge">
+          <div class="shrink-0 flex items-center justify-between p-space-sm rounded-xl" :class="decisionStyle(selected.decision).badge">
             <div class="flex items-center gap-2">
               <span class="h-2.5 w-2.5 rounded-full" :class="decisionStyle(selected.decision).dot"></span>
               <span class="text-headline font-headline">{{ decisionStyle(selected.decision).label }}</span>
@@ -661,7 +675,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 全部已持久化字段 -->
-          <div class="flex flex-col rounded-xl bg-surface-container overflow-hidden">
+          <div class="shrink-0 flex flex-col rounded-xl bg-surface-container overflow-hidden">
             <div class="px-space-sm py-2 border-b border-hairline">
               <span class="eyebrow">{{ t('audit.detail.persisted') }}</span>
             </div>
@@ -731,7 +745,14 @@ onBeforeUnmount(() => {
               </div>
               <div class="flex flex-col gap-1 px-space-sm py-2">
                 <dt class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.field.snippet') }}</dt>
-                <dd class="text-caption-1 font-caption-1 text-on-surface break-words">{{ selected.snippet || (snippetRecorded ? '-' : snippetPlaceholder) }}</dd>
+                <!-- 送检摘要是用户原文，上限是 max_state_chars（16000 字）。给它自己的
+                     滚动区而不是让它自由撑高：否则一条记录就能把上面所有字段顶出可视区，
+                     而这一块恰恰是最不需要整屏铺开的内容。pre-wrap 保留原文换行。 -->
+                <dd
+                  v-if="selected.snippet"
+                  class="max-h-40 overflow-auto rounded-lg bg-surface-container-low px-2 py-1.5 text-caption-1 font-caption-1 text-on-surface whitespace-pre-wrap break-words"
+                >{{ selected.snippet }}</dd>
+                <dd v-else class="text-caption-1 font-caption-1 text-on-surface-variant">{{ snippetRecorded ? '-' : snippetPlaceholder }}</dd>
                 <span v-if="!snippetRecorded" class="text-caption-2 font-caption-2 text-outline">
                   {{ t('audit.snippetOffNote') }}
                 </span>
@@ -741,7 +762,7 @@ onBeforeUnmount(() => {
 
           <!-- 未持久化字段：明确降级，不留空值也不编造。地理位置是唯一一项：
                审计只落原始来源 IP，归属地在「IP 风险分析」页离线解析。 -->
-          <div class="flex flex-col gap-space-sm p-space-sm rounded-xl border border-dashed border-outline-variant/60">
+          <div class="shrink-0 flex flex-col gap-space-sm p-space-sm rounded-xl border border-dashed border-outline-variant/60">
             <span class="eyebrow">{{ t('audit.detail.notPersisted') }}</span>
             <div class="flex flex-col gap-space-xs">
               <div class="flex items-center justify-between gap-space-sm">
@@ -753,7 +774,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- 处置：一键封禁来源 IP，走与「IP 风险分析」页规则池同一个接口 -->
-        <div class="px-space-md py-space-sm border-t border-hairline flex flex-col gap-space-xs">
+        <div class="shrink-0 px-space-md py-space-sm border-t border-hairline flex flex-col gap-space-xs">
           <span class="eyebrow">{{ t('audit.action.section') }}</span>
           <button
             v-if="selected.ip"

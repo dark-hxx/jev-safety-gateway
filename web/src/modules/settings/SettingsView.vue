@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import Icon from '../../components/Icon.vue'
 import HintTip from '../../components/HintTip.vue'
 import * as api from '../../api'
+import { confirmDialog } from '../../confirm'
 import { useConsole } from '../../console'
 import { durationOf, num, pctText, relativeOf } from '../../format'
 import { useI18n } from '../../i18n'
@@ -146,7 +147,15 @@ async function toggleKey(k: JEVKey): Promise<void> {
 
 async function removeKey(k: JEVKey): Promise<void> {
   keyError.value = ''
-  if (!window.confirm(t('settings.deleteKeyConfirm', { label: k.label }))) return
+  if (
+    !(await confirmDialog({
+      title: t('settings.deleteKeyTitle'),
+      message: t('settings.deleteKeyConfirm', { label: k.label }),
+      confirmText: t('settings.delete'),
+      danger: true,
+    }))
+  )
+    return
   keyBusy.value = true
   try {
     await api.deleteKey(k.id)
