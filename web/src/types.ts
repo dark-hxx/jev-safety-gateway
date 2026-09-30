@@ -30,15 +30,31 @@ export interface Settings {
   dedup_enabled: boolean
   /** 检定结果复用窗口（秒）；≤0 时后端回退为 60。 */
   dedup_window_sec: number
+  /**
+   * 触发滥用封禁时是否把该 IP 一并写入永久封禁规则；默认关闭。
+   * 内存态封禁随进程重启消失，只有落成规则才是真的永久——自动永久封禁
+   * 由启发式判定做出，所以默认关闭，且只能到「IP 风险分析」页删除规则解封。
+   */
+  abuse_ban_permanent: boolean
 }
 
-/** 与 internal/config/models.go 的 `JEVKey` 对应（`key` 仅在新增时提交，列表返回掩码）。 */
+/**
+ * 与 internal/config/models.go 的 `JEVKey` 对应（`key` 仅在新增时提交，列表返回掩码）。
+ * `calls` 是累计尝试次数，等于 `ok_calls + err_calls`；每次尝试都记在当时使用的那把
+ * 密钥上，包括可重试的 401/429/529 与网络失败。
+ */
 export interface JEVKey {
   id: number
   label: string
   masked: string
   enabled: boolean
   calls: number
+  /** 成功返回分值的次数。 */
+  ok_calls: number
+  /** 失败的次数。 */
+  err_calls: number
+  /** 最近一次失败的原因；从未失败时省略。 */
+  last_error?: string
   last_used?: string
   created_at: string
 }
@@ -60,6 +76,23 @@ export interface LogEntry {
   ip: string
   reason: string
   snippet: string
+  /**
+   * 网关为本次请求生成的全局唯一 ID（`req_` + 12 位十六进制），同时也作为
+   * `X-JEV-Request-Id` 响应头回给客户端；据此可以在审计流水里对上任意一次请求。
+   * 始终由网关生成，不采用客户端传来的请求 ID。
+   */
+  trace_id: string
+  /**
+   * 送检阶段的耗时（毫秒）：读 body、抽取、JEV 检定。仅在被 IP 规则或滥用封禁
+   * 拦下的记录上省略——那些请求从未走到这一步。
+   */
+  inspect_ms?: number
+  /**
+   * 转发阶段的耗时（毫秒）：从发起上游请求到收到响应首字节。是首字节时间而不是整段
+   * 交换——流式响应在客户端拿到响应之后还会持续很久，计入会把一条 60 秒的 SSE
+   * 拖进延迟分位数。未转发的记录省略（不补 0）。
+   */
+  upstream_ms?: number
 }
 
 /** 与 internal/config/models.go 的 `Stats` 对应。 */
@@ -97,6 +130,16 @@ export interface StatsResponse extends Stats {
   score_buckets: number[]
   /** 区间内已送检但没有分值的记录数（JEV 未返回分值）。 */
   unscored: number
+  /**
+   * 区间内最繁忙的单个自然秒的请求数（按 `ts/1000` 分组取最大），用于说明
+   * 「峰值流量」是瞬时并发能力，而不是区间总量。
+   */
+  peak_pps: number
+  /**
+   * 紧邻本区间之前、等长的那个区间，用于环比。没有更早数据时各计数为 0，
+   * 前端据此显示「—」而不是把 0 当成一个真实的下跌。
+   */
+  previous: Stats
 }
 
 /** `GET /api/state` 的响应。 */

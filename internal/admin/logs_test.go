@@ -1,10 +1,12 @@
 package admin
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,5 +151,81 @@ func TestUnknownLogsSubpathStill404(t *testing.T) {
 		if w.Code != http.StatusNotFound {
 			t.Errorf("GET %s = %d, want 404", p, w.Code)
 		}
+	}
+}
+
+// CSV 导出：带 BOM、表头列数与每行列数一致，并且沿用与 /api/logs 相同的筛选条件。
+func TestLogsExportCSV(t *testing.T) {
+	h, store := newTestHandler(t)
+	seedLogs(t, store)
+	token := loginToken(t, h)
+
+	w := getWithToken(t, h, "/api/logs/export?model=gpt-4o", token)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/csv; charset=utf-8" {
+		t.Errorf("content-type = %q", ct)
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment") {
+		t.Errorf("content-disposition = %q, want an attachment", cd)
+	}
+	body := w.Body.String()
+	// Excel 靠 BOM 认出 UTF-8，缺了它中文原因与摘要会乱码。
+	if !strings.HasPrefix(body, "\xef\xbb\xbf") {
+		t.Fatalf("export is missing the UTF-8 BOM")
+	}
+	recs, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(body, "\xef\xbb\xbf"))).ReadAll()
+	if err != nil {
+		t.Fatalf("export is not valid CSV: %v", err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("got %d records, want header + 1 filtered row:\n%s", len(recs), body)
+	}
+	header, row := recs[0], recs[1]
+	if len(row) != len(header) {
+		t.Fatalf("row has %d fields, header has %d", len(row), len(header))
+	}
+	col := map[string]string{}
+	for i, name := range header {
+		col[name] = row[i]
+	}
+	// model=gpt-4o 是精确匹配，gpt-4o-mini 那一行不得出现。
+	if col["模型"] != "gpt-4o" {
+		t.Errorf("模型 = %q, want gpt-4o", col["模型"])
+	}
+	if strings.Contains(body, "gpt-4o-mini") {
+		t.Errorf("model filter leaked gpt-4o-mini into the export:\n%s", body)
+	}
+	// 分数列在未评分的行为空，与真实的 0 分相区分。
+	if _, ok := col["分数"]; !ok {
+		t.Errorf("header is missing the 分数 column: %v", header)
+	}
+}
+
+// 导出是 /api/* 的一员，未带 token 必须 401。
+func TestLogsExportRequiresToken(t *testing.T) {
+	h, _ := newTestHandler(t)
+	if w := getWithToken(t, h, "/api/logs/export", ""); w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+// 导出走的是浏览器下载，<a download> 带不了请求头，所以只有这条路由额外接受
+// 查询串里的 token；其它 /api/* 路由仍只认 Authorization 头。
+func TestLogsExportAcceptsQueryToken(t *testing.T) {
+	h, store := newTestHandler(t)
+	seedLogs(t, store)
+
+	if w := getWithToken(t, h, "/api/logs/export?token=bogus", ""); w.Code != http.StatusUnauthorized {
+		t.Errorf("bogus query token = %d, want 401", w.Code)
+	}
+	w := getWithToken(t, h, "/api/logs/export?token="+loginToken(t, h), "")
+	if w.Code != http.StatusOK {
+		t.Errorf("valid query token = %d, want 200", w.Code)
+	}
+	// 同样的查询串 token 在别的路由上不生效。
+	if w := getWithToken(t, h, "/api/logs?token="+loginToken(t, h), ""); w.Code != http.StatusUnauthorized {
+		t.Errorf("query token on /api/logs = %d, want 401", w.Code)
 	}
 }

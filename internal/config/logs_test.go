@@ -243,3 +243,142 @@ func TestLogModelsHonoursSinceWindow(t *testing.T) {
 		t.Errorf("过去窗口的模型数 = %d, want %d", len(models), len(all))
 	}
 }
+
+// --- 仪表盘与审计页新增读数所依赖的查询 ---
+
+// 峰值流量是「最繁忙的单个自然秒」的请求数，不是区间总量、也不是每桶恒为 1。
+// `ts/1000` 的分桶一旦被改成浮点除法（每个成一行、每行计数 1），或 MAX 被写成
+// SUM，这个数字就会静默地变成别的量——所以这里用 3/1/2 的分布把三者区分开。
+func TestPeakPPSIsBusiestSingleSecond(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "jev-safety-gateway.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// 秒内偏移跨越整秒边界，确保分桶按自然秒而不是按「距首条记录多久」。
+	base := time.Now().Add(-time.Minute).Truncate(time.Second)
+	in := func(offset time.Duration) {
+		store.AddLog(LogEntry{TS: base.Add(offset), Method: "POST", Path: "/v1/chat/completions", Decision: "allow", IP: "1.1.1.1"})
+	}
+	in(0)
+	in(300 * time.Millisecond)
+	in(700 * time.Millisecond) // 与上两条同属第 0 秒
+	in(time.Second)            // 第 1 秒
+	in(2 * time.Second)
+	in(2*time.Second + 500*time.Millisecond) // 第 2 秒
+
+	// 窗口外的记录不参与：更早一秒，若被算进去峰值仍应是 3，故单看它无法区分——
+	// 但它同时验证了下界，且总量断言会随它变化。
+	store.AddLog(LogEntry{TS: base.Add(-time.Second), Method: "POST", Path: "/v1/chat/completions", Decision: "allow", IP: "1.1.1.1"})
+
+	peak, err := store.PeakPPS(base, base.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("PeakPPS: %v", err)
+	}
+	if peak != 3 {
+		t.Errorf("peak = %d, want 3（第 0 秒最繁忙；总量是 6，浮点分桶会得到 1）", peak)
+	}
+
+	// 窗口只盖住第 1 秒时，峰值必须是那一秒的 1，而不是全库的最大值 3。
+	peak, err = store.PeakPPS(base.Add(time.Second), base.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("PeakPPS: %v", err)
+	}
+	if peak != 1 {
+		t.Errorf("窄窗口 peak = %d, want 1", peak)
+	}
+
+	// 窗口内没有任何记录时是 0，不是错误。
+	peak, err = store.PeakPPS(base.Add(time.Hour), base.Add(time.Hour+time.Second))
+	if err != nil {
+		t.Fatalf("PeakPPS: %v", err)
+	}
+	if peak != 0 {
+		t.Errorf("空窗口 peak = %d, want 0", peak)
+	}
+}
+
+// 环比的两段窗口必须「不重叠、不留缝」：上期是 [from, since)，本期是 [since, ∞)。
+// 恰好落在 since 上的那条记录属于本期——若两边都用闭区间，它会同时计入两期，
+// 环比就会出现一个凭空的增量。
+func TestStatsBetweenPreviousWindowIsHalfOpen(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "jev-safety-gateway.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	since := time.Now().Add(-time.Hour).Truncate(time.Second)
+	prevFrom := since.Add(-time.Hour)
+
+	add := func(ts time.Time) {
+		store.AddLog(LogEntry{TS: ts, Method: "POST", Path: "/v1/chat/completions", Decision: "allow", IP: "1.1.1.1"})
+	}
+	add(prevFrom.Add(-time.Second))   // 上期之前：两期都不算
+	add(prevFrom)                     // 上期下界：闭，算上期
+	add(since.Add(-time.Millisecond)) // 上期末：算上期
+	add(since)                        // 边界：只能算本期
+	add(since.Add(time.Minute))       // 本期
+
+	prev, err := store.StatsBetween(prevFrom, since)
+	if err != nil {
+		t.Fatalf("StatsBetween: %v", err)
+	}
+	if prev.Total != 2 {
+		t.Errorf("上期 total = %d, want 2（下界含、上界不含）", prev.Total)
+	}
+
+	cur, err := store.StatsSince(since)
+	if err != nil {
+		t.Fatalf("StatsSince: %v", err)
+	}
+	if cur.Total != 2 {
+		t.Errorf("本期 total = %d, want 2（since 上那条属于本期）", cur.Total)
+	}
+}
+
+// 转发耗时是在响应首字节（或缓冲响应读完后）回填的：审计行的 id 先落库、
+// 耗时后补。回填必须只命中那一行，且 id<=0 的无效调用不得误伤其它行。
+func TestUpdateLogForwardBackfillsLatency(t *testing.T) {
+	store := newLogStore(t)
+	before := mustQuery(t, store, LogFilter{IP: "192.168.1.20"})
+	if len(before) == 0 {
+		t.Fatal("前置条件不成立：样例库里没有 192.168.1.20 的记录")
+	}
+	target := before[0]
+
+	store.UpdateLogForward(target.ID, 120, 340)
+
+	after := mustQuery(t, store, LogFilter{IP: "192.168.1.20"})
+	var got *LogEntry
+	for i := range after {
+		if after[i].ID == target.ID {
+			got = &after[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("回填后找不到 id=%d 的行", target.ID)
+	}
+	if got.UpstreamMS == nil || *got.UpstreamMS != 120 {
+		t.Errorf("upstream_ms = %v, want 120", got.UpstreamMS)
+	}
+	if got.LatencyMS != 340 {
+		t.Errorf("latency_ms = %d, want 340（回填成检定+转发之和）", got.LatencyMS)
+	}
+	// 同一 IP 的另一条记录不受影响。
+	for _, e := range after {
+		if e.ID != target.ID && e.LatencyMS == 340 {
+			t.Errorf("id=%d 被误改：latency_ms 也成了 340", e.ID)
+		}
+	}
+
+	// 无效 id：静默忽略，不得把全表或第 0 行改掉。
+	store.UpdateLogForward(0, 9, 9)
+	again := mustQuery(t, store, LogFilter{IP: "192.168.1.20"})
+	for _, e := range again {
+		if e.LatencyMS == 9 {
+			t.Fatalf("id=0 的调用改了 id=%d 的行", e.ID)
+		}
+	}
+}

@@ -6,7 +6,7 @@ import HintTip from '../../components/HintTip.vue'
 import NotConnected from '../../components/NotConnected.vue'
 import * as api from '../../api'
 import { useConsole } from '../../console'
-import { num, pctText } from '../../format'
+import { deltaPctText, num, pctText } from '../../format'
 import { useI18n } from '../../i18n'
 import type { MessageKey } from '../../i18n/zh'
 import type { Stats, StatsResponse } from '../../types'
@@ -24,10 +24,10 @@ import ScoreDistribution from './ScoreDistribution.vue'
  * 分桶与空桶补零都在后端完成；分值分布直接用 `score_buckets`/`unscored`。
  * 前端不自行分桶、不插值、不估算占比。
  *
- * 原型中其余缺少后端来源的元素（多集群节点与地理位置、峰值 PPS、
- * Token 估算、SLA/Overhead、同比环比）一律以 `NotConnected` 降级态呈现，
- * 不显示任何无来源数值。
+ * 环比与峰值都由 `/api/stats` 一起给出：`previous` 是紧邻本区间之前的等长区间，
+ * `peak_pps` 是区间内最繁忙的单个自然秒。两者都由后端算好，前端只做差与渲染。
  */
+
 const { settings, keys, stats24h } = useConsole()
 const router = useRouter()
 const { t } = useI18n()
@@ -52,8 +52,19 @@ const series = ref<StatsResponse['series']>([])
 const scoreBuckets = ref<number[]>([])
 const unscored = ref(0)
 const bucketSeconds = ref(0)
+/** 区间内最繁忙单秒的请求数；`/api/stats` 返回前为 0，此时不显示数值。 */
+const peakPPS = ref(0)
+/** 紧邻本区间之前的等长区间，用于环比；未取到数据时为 null。 */
+const previous = ref<Stats | null>(null)
 /** 延迟分位数；取不到时为 null，卡片回退降级态。 */
 const latency = ref<api.LatencyStats | null>(null)
+/**
+ * 延迟接口的错误原文。**必须与「区间内没有记录」分开**：两者都让 `latency`
+ * 为 null，但一个是「确实没有请求可统计」，另一个是接口失败（token 过期、
+ * 500、网络中断）。早先的 `catch { latency.value = null }` 把后者静默伪装成
+ * 前者——接口挂了看起来和没流量一模一样，而这恰恰是最需要立刻看见的情况。
+ */
+const latencyError = ref('')
 const loading = ref(false)
 const loaded = ref(false)
 const loadError = ref('')
@@ -71,6 +82,8 @@ async function loadStats(): Promise<void> {
     scoreBuckets.value = r.score_buckets ?? []
     unscored.value = r.unscored ?? 0
     bucketSeconds.value = r.bucket_seconds ?? 0
+    peakPPS.value = r.peak_pps ?? 0
+    previous.value = r.previous ?? null
     loaded.value = true
     refreshedAt.value = new Date()
   } catch (e) {
@@ -83,8 +96,10 @@ async function loadStats(): Promise<void> {
 async function loadLatency(): Promise<void> {
   try {
     latency.value = await api.getLatency(range.value.hours)
-  } catch {
+    latencyError.value = ''
+  } catch (e) {
     latency.value = null
+    latencyError.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -129,6 +144,18 @@ const errorShare = computed(() => pctText(stats.value.errors, stats.value.total)
 
 const adminHost = computed(() => (typeof location !== 'undefined' ? location.host : ''))
 
+/**
+ * 总请求量的环比。`null` 表示不可比：首屏快照阶段还没拿到 `previous`，或上期
+ * 本就没有记录（此时「涨幅」没有分母，硬算出来的百分比只会是噪声）。
+ */
+const totalDelta = computed(() => {
+  const prev = previous.value
+  if (!prev) return null
+  return deltaPctText(stats.value.total, prev.total)
+})
+
+const totalDeltaUp = computed(() => (totalDelta.value ?? '').startsWith('+'))
+
 /** P99 卡片副信息：给出中位数与样本量，让 P99 有个参照。 */
 const latencyDetail = computed(() => {
   const l = latency.value
@@ -137,12 +164,14 @@ const latencyDetail = computed(() => {
 })
 
 /**
- * 卡片底注。取样时如实标注为近似值——`sampled` 为真表示区间内的记录数超过了后端
- * 取样上限，分位数由按时间均匀的样本算出，不能当成整体分位数。
+ * 卡片底注。三种取不到数的情形各说各的：接口失败、区间内没有记录、取样近似。
+ * 旧文案对前两种统一说「延迟分布未接入」——那是后端还没有这个接口时的措辞，
+ * 接口早已存在，再用它就把「没流量」和「接口挂了」混成了一句话。
  */
 const latencyCaption = computed(() => {
+  if (latencyError.value) return t('dash.latencyFailedCaption')
   const l = latency.value
-  if (!l || l.count === 0) return t('dash.latencyUnhooked')
+  if (!l || l.count === 0) return t('dash.latencyNoRecords')
   return l.sampled ? t('dash.latencySampled') : t('dash.latencyFull')
 })
 </script>
@@ -179,15 +208,22 @@ const latencyCaption = computed(() => {
           </div>
         </div>
 
-        <!-- 实时指标带 -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-space-sm bg-surface-container-high/60 p-space-sm rounded-xl">
+        <!-- 实时指标带。原型的第四格是「集群实例」，本网关按设计单进程单实例，
+             没有节点名册可显示，因此整格移除而不是留一个永久降级态。 -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-space-sm bg-surface-container-high/60 p-space-sm rounded-xl">
           <div class="flex flex-col px-space-xs gap-0.5">
             <span class="eyebrow">{{ t('dash.forwarded', { range: rangeText }) }}</span>
             <span class="text-headline font-headline text-on-surface mono">{{ num(stats.total) }}</span>
           </div>
           <div class="flex flex-col px-space-xs gap-0.5">
             <span class="eyebrow">{{ t('dash.peakPps') }}</span>
-            <NotConnected :reason="t('dash.peakPpsReason')" />
+            <!-- `peak_pps` 是区间内最繁忙的单个自然秒的请求数，与「转送量」的区间
+                 总量是两个量纲：前者是瞬时并发能力，后者是累计。 -->
+            <span v-if="loaded" class="text-headline font-headline text-on-surface mono">
+              {{ num(peakPPS) }}<span class="text-caption-2 font-caption-2 text-on-surface-variant ml-1">req/s</span>
+            </span>
+            <span v-else class="text-headline font-headline text-outline mono">—</span>
+            <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.peakPpsSub') }}</span>
           </div>
           <div class="flex flex-col px-space-xs gap-0.5">
             <span class="eyebrow">{{ t('dash.gwState') }}</span>
@@ -199,13 +235,6 @@ const latencyCaption = computed(() => {
             </div>
             <span class="text-caption-2 font-caption-2 text-outline">
               {{ settings.fail_open ? t('dash.failOpenOn') : t('dash.failCloseOn') }}
-            </span>
-          </div>
-          <div class="flex flex-col px-space-xs gap-0.5">
-            <span class="eyebrow">{{ t('dash.cluster') }}</span>
-            <NotConnected :reason="t('dash.clusterReason')" />
-            <span class="text-caption-2 font-caption-2 text-outline">
-              {{ t('dash.keysAvail', { enabled: keysEnabled, total: keys.length }) }}
             </span>
           </div>
         </div>
@@ -221,7 +250,13 @@ const latencyCaption = computed(() => {
         </div>
         <div class="my-space-sm">
           <div class="text-title-2 font-title-2 text-on-surface tracking-tight mono">{{ num(stats.total) }}</div>
-          <div class="mt-0.5"><NotConnected :reason="t('dash.card.totalReason')" /></div>
+          <!-- 环比：与紧邻的上一等长区间比。上期没有记录时不显示百分比——
+               「从 0 增长到 N」没有可解释的涨幅，显示「—」比显示 100% 诚实。 -->
+          <div v-if="totalDelta" class="mt-0.5 flex items-center gap-1 text-caption-2 font-caption-2 text-on-surface-variant">
+            <Icon :name="totalDeltaUp ? 'trending-up' : 'trending-down'" class="text-[14px]" />
+            <span class="mono">{{ t('dash.card.totalDelta', { delta: totalDelta }) }}</span>
+          </div>
+          <div v-else-if="loaded" class="mt-0.5 text-caption-2 font-caption-2 text-outline">{{ t('dash.card.totalNoBase') }}</div>
         </div>
       </div>
 
@@ -297,23 +332,38 @@ const latencyCaption = computed(() => {
 
       <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
         <div class="flex items-center justify-between">
-          <!-- 口径是整条请求的总耗时（检定 + 转发），与审计页「网关耗时」一致；
-               logs 未拆分阶段，所以不叫「检定延迟」 -->
+          <!-- 口径是整条请求的总耗时（检定阶段 + 转发阶段），与审计页「总耗时」一致。
+               阶段已拆分到每条记录上（审计抽屉里可见），但这张卡片回答的是「端到端
+               有多慢」，所以仍取总数而不是其中一段。 -->
           <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('dash.card.latency') }}</span>
           <Icon name="gauge" class="text-primary text-[18px]" />
         </div>
         <div class="my-space-sm">
-          <template v-if="latency && latency.count > 0">
+          <!-- 三种状态互斥：接口失败 → 失败态（可重试）；有记录 → 数值；否则「无记录」。
+               失败态与「无记录」必须长成两个样子，否则接口挂了会被读成没流量。 -->
+          <div v-if="latencyError" class="flex items-center gap-1.5 text-caption-1 font-caption-1 text-error">
+            <Icon name="alert-circle" class="text-[16px] shrink-0" />
+            <span class="break-all">{{ t('dash.latencyFailed') }}</span>
+            <button
+              type="button"
+              class="shrink-0 px-2 py-0.5 rounded-md bg-error-container/40 hover:bg-error-container/60 text-caption-2 font-caption-2 transition-colors"
+              @click="loadLatency"
+            >
+              {{ t('dash.latencyRetry') }}
+            </button>
+          </div>
+          <template v-else-if="latency && latency.count > 0">
             <div class="text-title-2 font-title-2 text-primary tracking-tight mono">
               {{ latency.p99 }}<span class="text-caption-1 font-caption-1 text-on-surface-variant ml-1">ms</span>
             </div>
             <div class="text-caption-2 font-caption-2 text-on-surface-variant mt-0.5">{{ latencyDetail }}</div>
           </template>
-          <NotConnected v-else :reason="t('dash.card.latencyReason')" />
+          <NotConnected v-else :title="t('dash.latencyNoRecordsTitle')" :reason="t('dash.card.latencyReason')" />
         </div>
         <div class="flex items-center gap-1.5 text-caption-2 font-caption-2 text-outline">
           <span>{{ latencyCaption }}</span>
           <HintTip v-if="latency?.sampled" :text="t('dash.latencySampledTip')" />
+          <HintTip v-else-if="latencyError" :text="latencyError" />
         </div>
       </div>
     </section>
@@ -425,51 +475,34 @@ const latencyCaption = computed(() => {
         <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.storage') }}</span>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-space-md">
-        <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <Icon name="server" class="text-secondary text-[20px]" />
-              <div class="flex flex-col">
-                <span class="text-headline font-headline text-on-surface leading-tight">{{ t('dash.node') }}</span>
-                <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.nodeSub') }}</span>
-              </div>
-            </div>
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-secondary/15 text-secondary">
-              {{ settings.enabled ? t('dash.tag.healthy') : t('dash.tag.disabled') }}
-            </span>
-          </div>
-          <div class="grid grid-cols-2 gap-space-sm my-space-md bg-surface-container-low/70 p-space-sm rounded-xl">
+      <!-- 单节点卡片占满整行：原型这里并排「节点 + 集群拓扑」，而集群拓扑在本
+           网关没有后端来源（单进程单实例），留着就是一格永久降级占位。 -->
+      <div class="flex flex-col justify-between p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <Icon name="server" class="text-secondary text-[20px]" />
             <div class="flex flex-col">
-              <span class="eyebrow">{{ t('dash.nodeSwitch') }}</span>
-              <span class="text-headline font-headline text-on-surface">{{ settings.enabled ? t('dash.nodeOn') : t('dash.nodeOff') }}</span>
-            </div>
-            <div class="flex flex-col">
-              <span class="eyebrow">{{ t('shell.keyPool') }}</span>
-              <span class="text-headline font-headline text-on-surface mono">{{ keysEnabled }} / {{ keys.length }}</span>
-              <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.nodeKeysSub') }}</span>
+              <span class="text-headline font-headline text-on-surface leading-tight">{{ t('dash.node') }}</span>
+              <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.nodeSub') }}</span>
             </div>
           </div>
-          <div class="flex items-center justify-between text-caption-2 font-caption-2 text-on-surface-variant pt-space-xs">
-            <span>{{ t('shell.jevModel') }}</span>
-            <span class="font-code-body text-code-body text-on-surface mono truncate max-w-[10rem]">{{ settings.jev_model || t('shell.notSet') }}</span>
-          </div>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-secondary/15 text-secondary">
+            {{ settings.enabled ? t('dash.tag.healthy') : t('dash.tag.disabled') }}
+          </span>
         </div>
-
-        <div class="md:col-span-2 flex flex-col p-space-md rounded-2xl bg-surface-container shadow-md border border-hairline">
-          <div class="flex items-center justify-between mb-space-sm">
-            <div class="flex items-center gap-2">
-              <Icon name="network" class="text-outline text-[20px]" />
-              <span class="text-headline font-headline text-on-surface leading-tight">{{ t('dash.clusterTitle') }}</span>
-            </div>
-            <NotConnected :reason="t('dash.clusterTitleReason')" />
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-space-sm my-space-md bg-surface-container-low/70 p-space-sm rounded-xl">
+          <div class="flex flex-col">
+            <span class="eyebrow">{{ t('dash.nodeSwitch') }}</span>
+            <span class="text-headline font-headline text-on-surface">{{ settings.enabled ? t('dash.nodeOn') : t('dash.nodeOff') }}</span>
           </div>
-          <div class="flex-1">
-            <NotConnected
-              variant="placeholder"
-              :title="t('dash.clusterPlaceholder')"
-              :reason="t('dash.clusterPlaceholderReason')"
-            />
+          <div class="flex flex-col">
+            <span class="eyebrow">{{ t('shell.keyPool') }}</span>
+            <span class="text-headline font-headline text-on-surface mono">{{ keysEnabled }} / {{ keys.length }}</span>
+            <span class="text-caption-2 font-caption-2 text-outline">{{ t('dash.nodeKeysSub') }}</span>
+          </div>
+          <div class="flex flex-col">
+            <span class="eyebrow">{{ t('shell.jevModel') }}</span>
+            <span class="text-headline font-headline text-on-surface mono truncate">{{ settings.jev_model || t('shell.notSet') }}</span>
           </div>
         </div>
       </div>

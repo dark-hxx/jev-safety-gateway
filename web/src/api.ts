@@ -249,6 +249,28 @@ export function queryLogs(f: LogFilter): Promise<LogsResponse> {
 }
 
 /**
+ * `GET /api/logs/export`：把当前筛选条件下的审计流水导出为 CSV。
+ *
+ * 交回的是一个 URL 而不是响应体：导出是浏览器的一次下载，用 `<a download>` 触发才能
+ * 让浏览器按 Content-Disposition 命名并落盘，也不需要把整份流水先读进内存。鉴权靠
+ * 查询串里的 token —— 这条路由同样要求 bearer，而 `<a>` 带不了请求头。
+ *
+ * 筛选条件与 `queryLogs` 完全一致（后端共用同一套解析），所以导出的就是页面上正在看的
+ * 那批记录。`limit` / `offset` 不参与：导出的是整个结果集，不是当前页。
+ */
+export function logsExportURL(f: LogFilter): string {
+  const p = new URLSearchParams()
+  if (f.decision) p.set('decision', f.decision)
+  if (f.model) p.set('model', f.model)
+  if (f.path) p.set('path', f.path)
+  if (f.ip) p.set('ip', f.ip)
+  if (f.q) p.set('q', f.q)
+  if (f.since && f.since > 0) p.set('since', String(f.since))
+  p.set('token', token)
+  return '/api/logs/export?' + p.toString()
+}
+
+/**
  * 审计页模型下拉的选项：库中真实出现过的模型及次数，按次数倒序。
  * 只受时间窗影响——不叠加其它筛选条件，否则选中一个模型后下拉里就只剩它自己。
  */

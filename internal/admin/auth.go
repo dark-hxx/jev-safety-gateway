@@ -80,3 +80,16 @@ func bearer(r *http.Request) string {
 	}
 	return ""
 }
+
+// bearerQuery is bearer with a `token` query-parameter fallback, used by exactly
+// one route: the CSV export, which the console triggers as a browser download
+// (`<a download>`) and a download cannot carry a request header. Every other
+// route stays header-only — a token in a query string ends up in browser
+// history and any interposed access log, which is a real leak even on the
+// admin port, so the fallback is scoped to the one place it is unavoidable.
+func bearerQuery(r *http.Request) string {
+	if tok := bearer(r); tok != "" {
+		return tok
+	}
+	return r.URL.Query().Get("token")
+}

@@ -2,10 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import Icon from '../../components/Icon.vue'
 import HintTip from '../../components/HintTip.vue'
-import NotConnected from '../../components/NotConnected.vue'
 import * as api from '../../api'
 import { useConsole } from '../../console'
-import { durationOf, num, relativeOf } from '../../format'
+import { durationOf, num, pctText, relativeOf } from '../../format'
 import { useI18n } from '../../i18n'
 import type { JEVKey, Settings } from '../../types'
 
@@ -13,10 +12,16 @@ import type { JEVKey, Settings } from '../../types'
  * 网关与安全策略配置。
  *
  * 表单字段与后端 `Settings` 一一对应，读写走既有 `GET/PUT /api/settings`；
- * 密钥池走既有 `/api/keys` 及其子路径。原型中出现、但现有后端没有对应字段的
- * 控件（连通性测试、密钥健康成功率、分发池负载、WORM 归档与校验码、
- * 权重轮询、永久封禁、心跳间隔）一律以降级态呈现，不提交无效字段、
- * 不显示任何无来源数值。
+ * 密钥池走既有 `/api/keys` 及其子路径。
+ *
+ * 密钥健康来自 `jev_keys` 的 `ok_calls` / `err_calls` / `last_error`：每次检定尝试
+ * 都记在当时使用的那把密钥上（包括可重试的 401/429/529 与网络失败），所以在真实
+ * 请求中失败过的密钥会被标出来，不需要额外的主动探测接口。
+ *
+ * 原型中出现、但现有后端没有对应字段的控件（连通性测试、密钥权重、心跳间隔、
+ * 分发池负载、WORM 归档与校验码）一律不再呈现：它们没有后端来源，留着只会是
+ * 永久降级态。合规归档那一条保留为一句说明——审计数据确实落在 SQLite 的 logs
+ * 表里，可由运维自行备份，这不是缺失的能力。
  */
 const { settings, keys: keyPool, refresh, applySettings } = useConsole()
 const { t } = useI18n()
@@ -91,7 +96,7 @@ function reset(): void {
   saveOk.value = ''
 }
 
-/** 封禁时长预设。后端 `abuse_ban_sec` 是秒数，因此不提供「永久」预设。 */
+/** 封禁时长预设。后端 `abuse_ban_sec` 是秒数，永久封禁由 `abuse_ban_permanent` 单独开关。 */
 const BAN_PRESETS = [
   { labelKey: 'settings.banPreset10m', sec: 600 },
   { labelKey: 'settings.banPreset1h', sec: 3600 },
@@ -155,6 +160,21 @@ async function removeKey(k: JEVKey): Promise<void> {
 
 const keysEnabled = computed(() => keyPool.value.filter((k) => k.enabled).length)
 const totalCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.calls || 0), 0))
+const okCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.ok_calls || 0), 0))
+const errCalls = computed(() => keyPool.value.reduce((a, k) => a + (k.err_calls || 0), 0))
+
+/** 池整体的成功率；一次调用都没有时为 null，此时显示「—」而不是 0%。 */
+const successRate = computed(() => pctText(okCalls.value, totalCalls.value))
+
+/**
+ * 单把密钥的成功率。`calls` 是尝试次数口径，所以分母就是它；没有调用记录时
+ * 返回 null，由模板显示「—」——「从未用过」和「0% 成功」是两件事。
+ */
+function keySuccess(k: JEVKey): string | null {
+  const calls = k.calls || 0
+  if (calls <= 0) return null
+  return pctText(k.ok_calls || 0, calls)
+}
 
 /**
  * 当前开关下的拦截方向，一句话。阈值字段的短提示与 ⓘ 全文共用它，
@@ -224,7 +244,6 @@ const blockRule = computed(() =>
           </div>
           <span class="text-headline font-headline text-on-surface">{{ t('settings.group1') }}</span>
         </div>
-        <NotConnected :reason="t('settings.noProbe')" />
       </div>
 
       <div class="px-space-lg py-space-md grid grid-cols-1 lg:grid-cols-2 gap-space-md">
@@ -480,11 +499,24 @@ const blockRule = computed(() =>
                 {{ t('settings.banNow', { v: durationOf(form.abuse_ban_sec || 0) }) }}
               </span>
             </div>
-            <!-- 缺口说明收进徽标的悬浮提示，不再作为正文夹在短提示前面 -->
-            <div class="flex items-center gap-space-xs">
-              <NotConnected :reason="t('settings.banNoPermanent')" />
-              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.banPresetsHint') }}</span>
-            </div>
+            <!-- 永久封禁：开启后，触发滥用封禁的 IP 会额外写入一条永久封禁规则
+                 （内存态封禁重启即消失，规则才是真的永久）。这是让启发式判定
+                 自动产生一条永久记录的开关，所以默认关闭，且只能到规则池里删规则解封。 -->
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input
+                v-model="form.abuse_ban_permanent"
+                type="checkbox"
+                :disabled="!form.abuse_enabled"
+                class="mt-0.5 accent-primary"
+              />
+              <span class="flex flex-col gap-0.5">
+                <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface">
+                  {{ t('settings.banPermanent') }}
+                  <HintTip :text="t('settings.banPermanentTip')" />
+                </span>
+                <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.banPermanentHint') }}</span>
+              </span>
+            </label>
           </div>
         </div>
 
@@ -582,7 +614,6 @@ const blockRule = computed(() =>
           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-code-badge font-code-badge bg-secondary/15 text-secondary">
             {{ t('settings.roundRobin') }}
           </span>
-          <NotConnected :reason="t('settings.noWeight')" />
         </div>
       </div>
 
@@ -642,7 +673,16 @@ const blockRule = computed(() =>
                   {{ t('settings.keyLastUsed', { v: relativeOf(k.last_used) }) }}
                 </span>
               </div>
-              <NotConnected :reason="t('settings.keySuccessReason')" />
+              <!-- 成功率与最近一次失败原因：分母是尝试次数，所以「成功 0 / 尝试 0」
+                   显示为「—」（从未用过）而不是 0%。 -->
+              <div class="flex flex-col" :title="k.last_error || ''">
+                <span class="text-caption-1 font-caption-1 mono" :class="k.err_calls ? 'text-error' : 'text-on-surface'">
+                  {{ keySuccess(k) ?? '—' }}
+                </span>
+                <span class="text-caption-2 font-caption-2 text-outline">
+                  {{ t('settings.keyOkErr', { ok: num(k.ok_calls), err: num(k.err_calls) }) }}
+                </span>
+              </div>
               <label
                 class="relative inline-flex items-center cursor-pointer"
                 :title="k.enabled ? t('settings.keyDisable') : t('settings.keyEnable')"
@@ -677,6 +717,8 @@ const blockRule = computed(() =>
           </div>
         </div>
 
+        <!-- 四格全部是真实计数：轮询分发没有权重，也就没有「池负载」可算，
+             所以这里只放能由 ok_calls / err_calls 直接得出的事实。 -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-space-sm">
           <div class="flex flex-col p-space-sm rounded-xl bg-surface-container-low/70">
             <span class="eyebrow">{{ t('settings.keysEnabledTitle') }}</span>
@@ -687,21 +729,22 @@ const blockRule = computed(() =>
             <span class="text-headline font-headline text-on-surface mono">{{ num(totalCalls) }}</span>
           </div>
           <div class="flex flex-col p-space-sm rounded-xl bg-surface-container-low/70">
-            <span class="eyebrow">{{ t('settings.heartbeat') }}</span>
-            <NotConnected :reason="t('settings.heartbeatReason')" />
+            <span class="eyebrow">{{ t('settings.successRate') }}</span>
+            <span class="text-headline font-headline mono" :class="errCalls ? 'text-error' : 'text-on-surface'">
+              {{ successRate ?? '—' }}
+            </span>
           </div>
           <div class="flex flex-col p-space-sm rounded-xl bg-surface-container-low/70">
-            <span class="eyebrow">{{ t('settings.poolLoad') }}</span>
-            <NotConnected :reason="t('settings.poolLoadReason')" />
+            <span class="eyebrow">{{ t('settings.callsFailed') }}</span>
+            <span class="text-headline font-headline text-on-surface mono">{{ num(errCalls) }}</span>
           </div>
         </div>
 
-        <div class="flex items-center justify-between flex-wrap gap-space-xs p-space-md rounded-xl border border-dashed border-outline-variant/60">
-          <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface">
+        <div class="flex items-start gap-1.5 p-space-md rounded-xl bg-surface-container-low/70 shadow-inset">
+          <span class="inline-flex items-center gap-1.5 text-subheadline font-subheadline text-on-surface-variant">
             {{ t('settings.compliance') }}
             <HintTip :text="t('settings.complianceFoot')" />
           </span>
-          <NotConnected :reason="t('settings.complianceReason')" />
         </div>
       </div>
     </section>

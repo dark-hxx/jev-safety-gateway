@@ -31,7 +31,9 @@ func (a keyAdapter) EnabledKeys() ([]jev.Key, error) {
 	return out, nil
 }
 
-func (a keyAdapter) MarkKeyUsed(id int64) { a.s.MarkKeyUsed(id) }
+func (a keyAdapter) MarkKeyResult(id int64, ok bool, errMsg string) {
+	a.s.MarkKeyResult(id, ok, errMsg)
+}
 
 // Server holds the two listeners.
 type Server struct {

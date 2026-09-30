@@ -74,6 +74,17 @@ export function pctText(part: number, whole: number): string {
   return v == null ? '-' : `${v.toFixed(2)}%`
 }
 
+/**
+ * 带符号的百分比，用于环比：`+12.5%` / `-3.2%` / `+0.0%`。
+ * 上期为 0 时返回 null——「从 0 增长到 N」不是百分比能表达的事，调用方据此
+ * 显示「上期无数据」，而不是把除零的结果当成一个真实的涨幅。
+ */
+export function deltaPctText(current: number, previous: number): string | null {
+  if (!previous) return null
+  const v = ((current - previous) / previous) * 100
+  return (v > 0 ? '+' : '') + v.toFixed(1) + '%'
+}
+
 // --- 判定状态的展示映射（与 LogEntry.decision 取值一致）---
 
 export interface DecisionStyle {

@@ -6,14 +6,23 @@
 **范围**：以「只设计、不实施」为基线——不新增 `/api/*` 路径、不改 `logs` / `jev_keys` 表结构、不改 `internal/proxy` 埋点。
 界面侧对每一项都已落实「明确标注的降级态」，不显示任何无来源数值。
 
-**截至目前实际实施的后端改动有三处**（前两处为 Shape 阶段确认的 Q11/Q12/Q13，第三处为后续补做的 G23/G2，
-细节见「本次已实施的后端改动」一节）：
+> **基线已变更（本轮）**：后续两轮实施打破了上面这条基线——第二轮做了 G23/G2，第三轮做了
+> G3 / G6 / G7 / G11 / G14 / G18 与驾驶舱环比。**未实施的条目仍以「降级态」处理，但降级态已不是
+> 本文档主张的默认做法**：没有后端来源的控件一律从界面上**删除**，只对「此时确实取不到数据」
+> （登录页尚未拿到 `/api/version`、窗口内没有记录、未配置 GeoIP 库）保留「未接入」标注。
+> 原文中各条标注「降级策略（已落地）」的，凡本轮已实施者已就地补上「实现结果」，其余表示的仍是当时界面；
+> 界面现状一律以「本轮已实施」一节为准。
+
+**截至目前实际实施的后端改动**（细节见「本轮已实施」与「上一轮已实施的后端改动」两节）：
 
 1. `GET /api/stats` 在**既有路径**上扩展响应，新增逐桶时间序列与风险分值直方图（驾驶舱两张图的唯一数据来源，`internal/config` 只读聚合 + `internal/admin` 响应组装）；
 2. `internal/admin` 的静态资源改为 SPA 回落（history 路由的深链接可直接打开）；
-3. 新增 `GET /api/version`（免鉴权，构建身份 + 实际绑定的监听地址）与 `GET /api/stats/latency`（鉴权，窗口内延迟分位数）。
+3. 新增 `GET /api/version`（免鉴权，构建身份 + 实际绑定的监听地址）与 `GET /api/stats/latency`（鉴权，窗口内延迟分位数）；
+4. 新增 `GET /api/logs/export`（鉴权，CSV 流式导出）、`logs` 表新增 `trace_id` / `inspect_ms` / `upstream_ms` 三列、
+   `jev_keys` 表新增 `ok_calls` / `err_calls` / `last_error` 三列、新增 `Settings.abuse_ban_permanent`
+   （全部为带默认值的追加式迁移），`GET /api/stats` 再追加 `peak_pps` 与 `previous` 两个字段。
 
-除此之外，本文档的其余条目仍是**方案设计**，未实施。
+除上述四项外，本文档的其余条目仍是**方案设计**，未实施。
 
 **现状事实**（全部来自代码，非推断）：
 
@@ -34,41 +43,147 @@
 
 ## 结论摘要
 
-| 编号 | 界面元素 | 所在界面 | 缺口类型 | 建议优先级 |
-| --- | --- | --- | --- | --- |
-| G1 | 时间序列趋势图（按时间分桶） | 驾驶舱 | B 只读聚合 | 高 |
-| G2 | 延迟分位数（P99 / P95） | 驾驶舱、审计 | B + 索引 | 高 |
-| G3 | 峰值流量 PPS | 驾驶舱 | D 主链路埋点 | 中 |
-| G4 | 威胁类型分类占比 | 驾驶舱 | C 表变更 + 分类口径 | 中 |
-| G5 | Token 估算与风险级 | 审计 | D 主链路埋点 + C | 低 |
-| G6 | 耗时分解（检定 / 转发） | 审计 | D 主链路埋点 | 中 |
-| G7 | 全局请求唯一 ID | 审计 | D 主链路埋点 + C | 中 |
-| G8 | 完整原始请求体 | 审计 | C 表变更（**建议不补**） | 不做 |
-| G9 | 地理位置（IP 归属地） | 审计 | E 外部数据源 | 低 |
-| G10 | 处置规则矩阵 / 命名规则链 | 审计 | C 表变更 + 规则引擎 | 低 |
-| G11 | 导出 CSV | 审计 | F 写接口（只读流） | 中 |
-| G12 | 加入黑名单 | 审计 | F 写接口 | 中 |
-| G13 | 重放测试 | 审计 | F 写接口 | 低 |
-| G14 | 密钥健康成功率 | 配置 | C 表变更 + D 埋点 | 中 |
-| G15 | 密钥健康心跳 | 配置 | E 进程内探活组件 | 低 |
-| G16 | 分发池负载 | 配置 | B 派生或丢弃 | 低 |
-| G17 | 权重轮询 | 配置 | C 表变更 + 路由改造 | 低 |
-| G18 | 永久封禁 | 配置 | C 语义扩展（设置项） | 低 |
-| G19 | 连通性测试 | 配置 | F 写接口（主动探测） | 中 |
-| G20 | 多集群节点与地理分布 | 驾驶舱 | E 新组件 | 不做 |
-| G21 | 集群 SLA / 网关开销 | 驾驶舱 | E 新组件 | 不做 |
-| G22 | WORM 合规归档与审计校验码 | 配置 | E 新组件 | 不做 |
-| G23 | 版本 / 构建信息 | 壳层 | B 只读（编译期注入） | 高 |
+| 编号 | 界面元素 | 所在界面 | 缺口类型 | 建议优先级 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| G1 | 时间序列趋势图（按时间分桶） | 驾驶舱 | B 只读聚合 | 高 | 已实施 |
+| G2 | 延迟分位数（P99 / P95） | 驾驶舱、审计 | B + 索引 | 高 | 已实施 |
+| G3 | 峰值流量 PPS | 驾驶舱 | D 主链路埋点 | 中 | **已实施（改走 SQL 聚合）** |
+| G4 | 威胁类型分类占比 | 驾驶舱 | C 表变更 + 分类口径 | 中 | — |
+| G5 | Token 估算与风险级 | 审计 | D 主链路埋点 + C | 低 | — |
+| G6 | 耗时分解（检定 / 转发） | 审计 | D 主链路埋点 | 中 | **已实施** |
+| G7 | 全局请求唯一 ID | 审计 | D 主链路埋点 + C | 中 | **已实施** |
+| G8 | 完整原始请求体 | 审计 | C 表变更（**建议不补**） | 不做 | — |
+| G9 | 地理位置（IP 归属地） | 审计 | E 外部数据源 | 低 | — |
+| G10 | 处置规则矩阵 / 命名规则链 | 审计 | C 表变更 + 规则引擎 | 低 | — |
+| G11 | 导出 CSV | 审计 | F 写接口（只读流） | 中 | **已实施** |
+| G12 | 加入黑名单 | 审计 | F 写接口 | 中 | 已实施 |
+| G13 | 重放测试 | 审计 | F 写接口 | 低 | — |
+| G14 | 密钥健康成功率 | 配置 | C 表变更 + D 埋点 | 中 | **已实施** |
+| G15 | 密钥健康心跳 | 配置 | E 进程内探活组件 | 低 | 不做（已删控件） |
+| G16 | 分发池负载 | 配置 | B 派生或丢弃 | 低 | 不做（已删控件） |
+| G17 | 权重轮询 | 配置 | C 表变更 + 路由改造 | 低 | 不做（已删徽章） |
+| G18 | 永久封禁 | 配置 | C 语义扩展（设置项） | 低 | **已实施** |
+| G19 | 连通性测试 | 配置 | F 写接口（主动探测） | 中 | 不做（已删控件） |
+| G20 | 多集群节点与地理分布 | 驾驶舱 | E 新组件 | 不做 | 不做（已删卡片） |
+| G21 | 集群 SLA / 网关开销 | 驾驶舱 | E 新组件 | 不做 | 不做 |
+| G22 | WORM 合规归档与审计校验码 | 配置 | E 新组件 | 不做 | 不做（改为一句说明） |
+| G23 | 版本 / 构建信息 | 壳层 | B 只读（编译期注入） | 高 | 已实施 |
 
 > **本次状态**：G1 的「逐桶时间序列」与 G4 在驾驶舱的原始形态已被 Q11/Q12 的两项聚合取代并**已实施**
-> （见下一节），因此驾驶舱的趋势图与分布图不再是降级态。**另一项已实施的改动是 G23 版本 / 构建信息与
-> G2 延迟分位数**（见「本次已实施」一节的补充条目），登录页与驾驶舱相应徽章不再是降级态；
-> G1 中仍未做的部分（逐桶的 `skipped`/`errors` 细分、独立 `/api/stats/timeseries` 路径）
-> 与其余条目一样保持「设计未实施」，G3、G5…G22 的降级态均未变化。
+> （见下一节），因此驾驶舱的趋势图与分布图不再是降级态。G23 版本 / 构建信息与 G2 延迟分位数同样已实施。
+> 第三轮又实施了 G3 / G6 / G7 / G11 / G14 / G18 与驾驶舱环比（见「本轮已实施」一节）。
+> G1 中仍未做的部分（逐桶的 `skipped`/`errors` 细分、独立 `/api/stats/timeseries` 路径）、G4/G5/G8/G9/G10/G13
+> 与 G21 保持「设计未实施」；G15/G16/G17/G19/G20/G22 判定为**不值得补**，界面控件已直接删除（不是降级态）。
 
 ---
 
-## 本次已实施的后端改动（Q11 / Q12 / Q13 + G23 / G2）
+## 本轮已实施（G3 / G6 / G7 / G11 / G14 / G18 + 环比）
+
+**贯穿本轮的一条界面原则**：没有后端来源的控件不再以「降级态」呈现，而是**直接删除**。
+删除的 12 处标注：审计抽屉的 Token 估算与风险级、处置规则矩阵、原始请求体、重放测试；
+驾驶舱的集群实例卡（3 处）；配置页的连通性测试、权重轮询、健康心跳、分发池负载、WORM 归档。
+保留的「未接入」只剩**此时确实取不到数据**的三种：登录页尚未拿到 `/api/version`（3 处）、
+窗口内没有记录的延迟分位、未配置 GeoIP/ASN 库。组件自身的契约写进了 `web/src/components/NotConnected.vue`。
+
+### 表结构（全部为追加式迁移）
+
+`hasColumn(table, column)`（`SELECT name FROM pragma_table_info(?)`）逐列判断后再 `ALTER TABLE ... ADD COLUMN`，
+因此旧库原地升级、旧行取默认值、旧二进制读新库不受影响。
+
+| 表 | 新增列 | 含义 |
+| --- | --- | --- |
+| `logs` | `trace_id TEXT NOT NULL DEFAULT ''` | G7：本请求的网关内唯一 ID |
+| `logs` | `inspect_ms INTEGER` / `upstream_ms INTEGER` | G6：检定阶段 / 转发阶段耗时（ms），可空 |
+| `jev_keys` | `ok_calls` / `err_calls INTEGER NOT NULL DEFAULT 0` | G14：成功 / 失败尝试次数 |
+| `jev_keys` | `last_error TEXT NOT NULL DEFAULT ''` | G14：最近一次失败的摘要（截断，不含密钥值） |
+
+`Settings` 新增 `abuse_ban_permanent`（JSON blob，`load()` 在 `DefaultSettings()` 之上解码，缺键即取默认 false）。
+
+### G6 耗时分解 —— 与建议方案的差异
+
+- **建议**是 `logs.jev_ms` + `logs.upstream_ms`；**实际**落地为 `inspect_ms` + `upstream_ms`。
+  原因是主链路上「读 body → 抽取 → 送检」本来就是一个不可分割的相位（取消注入、base64 展开都在其中），
+  只给 JEV 调用计时会把抽取耗时算进转发阶段，反而解释不了慢在哪。因此第一阶段叫 `inspect_ms`（检定阶段）。
+- **回填而非一次写全**：审计行先落库（拿到 `id`），转发耗时在响应首字节时补写 ——
+  `httputil.ReverseProxy.ModifyResponse` 与 `ServeHTTP` 同 goroutine、在响应头时刻运行，
+  所以 `forward()` 用 `Director` 记下起点、在 `ModifyResponse` 里算「到首字节」并调
+  `store.UpdateLogForward(id, upstreamMS, inspectMS+upstreamMS)`。流式响应在首字节之后继续传输的部分不计入，
+  这一点写在抽屉的副注里，不是填 0 冒充。未转发的记录 `upstream_ms` 为 `NULL`，抽屉显示「未转发」而不是 0 ms。
+- **`CheckResponse` 路径**（`forwardChecked`）是缓冲响应的，第二阶段的起点改在缓冲读完之后；但那条路的
+  **响应审计**耗时另行记为响应行的 `inspect_ms`，用同一套列语义，不混进请求行。
+
+### G7 全局请求唯一 ID —— 与建议方案的差异
+
+- **建议**列名 `req_id`；**实际**为 `trace_id`，取值 `req_` + 12 位十六进制（`crypto/rand`），
+  见 `internal/proxy/trace.go`。**绝不采用客户端传入的值**——它只用于把客户端上报对上审计行，
+  不能成为可被伪造的字段。
+- 响应头 `X-JEV-Request-Id` 在 `ServeHTTP` 入口无条件写入（与 `writeBlocked` / `forward` / `forwardChecked`
+  三条出口无关，因此不存在漏写分支）。这是**对外协议的新增**，本文档原先列为「需评估」：
+  实践上未知响应头不会让任何合规客户端失败，且它是把客户端投诉对上审计行的唯一手段，因此默认开启。
+- 老行 `trace_id` 为空串，抽屉显示 `-`，不编造。
+
+### G3 峰值流量 PPS —— 与建议方案的差异
+
+- **建议**是进程内滑动窗口计数器 + 低频 ticker + 新端点 `GET /api/stats/throughput`；**实际没有新端点、
+  没有常驻 goroutine**：峰值直接从既有的 `logs` 表算——`SELECT COALESCE(MAX(c),0) FROM (SELECT COUNT(*) c
+  FROM logs WHERE ts>=? AND ts<=? GROUP BY ts/1000)`（`Store.PeakPPS`）。
+  理由：审计行是每个到达网关的请求都写的全量记录，聚合在 SQLite 里完成、不把窗口搬进 Go，
+  比引入进程内状态更简单，且**重启后峰值不丢**（进程内计数器会清零）。代价是它随日志保留期一起老去。
+- 语义是「窗口内最繁忙的**单个自然秒**」的请求数（按绝对 `ts/1000` 分桶，不是「距窗口起点多久」），
+  与「转送量」的区间总量是两个量纲，界面上分别标注。`ts/1000` 依赖 SQLite 整数除法，
+  测试 `TestPeakPPSIsBusiestSingleSecond` 用 3/1/2 的分布把「总量」「每桶 1」「真实峰值」三者区分开。
+
+### 环比 —— 新增 `previous` 字段
+
+`GET /api/stats` 追加 `previous`（等长上一区间 `[since-hours, since)` 的同一组聚合）。
+两段窗口是**无重叠、无缝隙**的：上期 `ts>=from AND ts<since`，本期 `ts>=since`。
+恰好落在 `since` 上的那条记录只算本期——`TestStatsBetweenPreviousWindowIsHalfOpen` 钉住这一点。
+上期总量为 0 时前端不显示百分比（`format.ts` 的 `deltaPctText` 返回 `null`），卡片显示「上期无数据，暂无环比」：
+「从 0 增长到 N」不是百分比能表达的事。上期的查询错误被容忍（`previous, _ :=`）——
+环比是锦上添花，为此让整页 500 不划算。
+
+### G11 导出 CSV —— 与建议方案的差异
+
+- **路径**为 `GET /api/logs/export`（不是 `/api/logs/export.csv`），与 `/api/logs` 共用参数语义和
+  `logFilterFrom()`，忽略 `limit`/`offset`。
+- **鉴权**：`<a download>` 带不了请求头，因此这条路由（且只有这条）额外接受 `?token=` 作为 bearer 的替代，
+  见 `internal/admin/auth.go` 的 `bearerQuery`。token 是登录后内存会话的令牌，不写入磁盘。
+- `encoding/csv` + `cw.UseCRLF = true`（RFC 4180 / Excel）+ UTF-8 BOM，`bufio` 流式输出，不整表入内存。
+- 行数上限 20 万，超限时追加一行 `# truncated` 哨兵而不是静默截断；写失败追加 `# export failed`。
+  导出动作记一条 `logx.Debugf`（沿用既有日志，未新增 `admin_audit` 表）。
+- 导出的就是屏幕上正在看的那批筛选条件（`currentFilter()` 由列表与导出共用）。
+
+### G14 密钥健康成功率
+
+- **口径**：`calls` 是**尝试次数**，`ok_calls` + `err_calls` = `calls`，成功率分母就是 `calls`。
+- **记账点**：一次尝试记在**当时使用的那把密钥**上，包括可重试失败（401/429/529）与网络错误——
+  那正是这把密钥自己的失败，也正是它让轮换切到了下一把。`internal/jev` 通过 `KeyProvider.MarkKeyResult`
+  回调（实现方在 `internal/server` 的 `keyAdapter`），jev 包因此仍不依赖 config。
+- **从未用过的密钥**显示 `—` 而不是 0%：「没有调用记录」与「0% 成功」是两件事。
+- 池整体成功率在配置页第四格；「健康心跳」「分发池负载」两格已删除（无后端来源）。
+
+### G18 永久封禁 —— 与建议方案的差异
+
+- **建议**用 `abuse_ban_sec < 0` 表示永久；**实际**是独立的布尔设置 `abuse_ban_permanent`。
+  理由：负数语义要塞进「时长」这一个字段，会让校验、界面文案、`internal/abuse` 的 `until` 三处都变复杂；
+  而真正要表达的是一件独立的事——**这次自动封禁要不要落成一条持久规则**。
+- **实现**：`abuse` 的封禁本身仍是进程内的（重启即消失，这是既有性质），开关打开时在主链路额外调
+  `store.AddIPRule(ip, IPRuleBlock, "滥用自动封禁（永久）：窗口内 N 次有害内容", nil)`，
+  写进 `ip_rules` 表——**规则才是真的永久**。因此解封只能到「IP 风险分析」页的规则池里删规则。
+- 默认**关闭**：让一个启发式判定自动产生一条需要人工删除的持久记录，必须是显式选择。
+  界面上的复选框在「自动拉黑」总开关关闭时禁用。
+
+### 其它
+
+- 审计页新增「导出 CSV」按钮、抽屉新增「请求唯一 ID / 检定阶段 / 转发阶段」三行；
+- `web/src/components/Icon.vue` 新增 `trending-down`（环比下降），`trending-up` 已有；
+- 三张表的新列都有对应测试：`TestPeakPPSIsBusiestSingleSecond`、
+  `TestStatsBetweenPreviousWindowIsHalfOpen`、`TestUpdateLogForwardBackfillsLatency`（`internal/config/logs_test.go`）、
+  `TestLogsExportCSV` / `TestLogsExportRequiresToken` / `TestLogsExportAcceptsQueryToken`（`internal/admin/logs_test.go`）。
+
+---
+
+## 上一轮已实施的后端改动（Q11 / Q12 / Q13 + G23 / G2）
 
 三处改动都不新增 `/api/*` 路径、不改表结构、不触碰 `internal/proxy`，因此不改变放行/拦截/跳过/错误的判定语义、
 `X-JEV-Gateway` / `X-JEV-Score` 响应头与 SSE 流式透传。
@@ -131,7 +246,7 @@
 
 - **界面元素**：驾驶舱「流量与安全威胁态势」折线/面积图，`1h / 6h / 24h / 7d` 四档。
 - **本次已实现的部分**：逐桶序列已随 `GET /api/stats` 一并返回（`bucket_seconds` + `series`，
-  见「本次已实施的后端改动」），驾驶舱据此绘制「入站总量 / 安全放行 / 拦截」三序列，切换档位即以对应 `hours` 重新查询重绘。
+  见「上一轮已实施的后端改动」），驾驶舱据此绘制「入站总量 / 安全放行 / 拦截」三序列，切换档位即以对应 `hours` 重新查询重绘。
 - **仍为缺口的部分**：每桶只给出三个计数，没有 `skipped` / `errors` 的逐桶细分（无法按桶画出跳过与容灾曲线）；
   也没有独立的 `/api/stats/timeseries` 路径（当前不需要，调用方只有控制台）。
 - **后续接口（如需细分）**：`GET /api/stats/timeseries?hours=24&bucket=300`
@@ -205,7 +320,7 @@
 - **界面元素**：驾驶舱「安全威胁类型分布」环形图（越狱注入 / PII / 爬虫泛洪 / 违规内容四类）。
 - **本次的口径变化**：Shape 阶段确认（Q12）用**风险分值分布**替代该四分类——JEV 只返回一个 0~1 的 `noul` 分值、
   不返回分类标签，四分类没有真实数据来源，而分值直方图可以直接从既有的 `logs.score` 聚合出来。
-  该直方图已随 `GET /api/stats` 落地（`score_buckets` + `unscored`，见「本次已实施的后端改动」），
+  该直方图已随 `GET /api/stats` 落地（`score_buckets` + `unscored`，见「上一轮已实施的后端改动」），
   因此驾驶舱此处不再是降级态；本条目剩下的部分是「真要按威胁类型分类」的缺口。
 - **现状态**：只有 `decision`（是否拦截）与 `reason` 自由文本，没有威胁类型枚举。
 - **建议模型**：`logs.threat_type TEXT NOT NULL DEFAULT ''`，取值收敛为 `jailbreak|pii|abuse_content|crawler|unknown`。
@@ -230,26 +345,28 @@
 - **降级策略（已落地）**：KPI 条不呈现 Token 卡片；抽屉中「Token 估算与风险级」显示「未接入」。
 - **侵入范围**：`internal/config`、`internal/proxy`（`decide` 与响应审计路径）。
 
-### G6 耗时分解
+### G6 耗时分解 —— **已实施（`inspect_ms` + `upstream_ms`，见「本轮已实施」）**
 
 - **界面元素**：审计抽屉「安全模型 / 耗时分析」（检定耗时 vs 转发耗时）。
 - **现状态**：只有端到端 `latency_ms`。
 - **建议模型**：`logs.jev_ms INTEGER NOT NULL DEFAULT 0`、`logs.upstream_ms INTEGER NOT NULL DEFAULT 0`。
 - **采集点**：`internal/proxy/proxy.go` 在 `decide()` 内包裹 JEV 调用计时；转发耗时在 `forward()` 返回前计时（流式转发下等于「首字节时间」，需在字段语义上写清）。
-- **降级策略（已落地）**：抽屉显示「未接入」，不进位显示 0。
+- **降级策略（已落地，现已实施）**：抽屉显示「未接入」，不进位显示 0。
+- **实现结果**：抽屉给出「总耗时 / 检定阶段 / 转发阶段」三行，第一阶段含读 body、抽取与送检。
 - **侵入范围**：`internal/config`、`internal/proxy`。
 
-### G7 全局请求唯一 ID
+### G7 全局请求唯一 ID —— **已实施（`trace_id` + `X-JEV-Request-Id`，见「本轮已实施」）**
 
 - **界面元素**：审计抽屉「全局网关唯一 ID `req_9fa7b401e92d`」。
 - **现状态**：仅有 SQLite 自增 `id`（前端已如实展示为 `#126`）。
 - **建议模型**：`logs.req_id TEXT NOT NULL DEFAULT ''`；生成 `req_` + 12 位十六进制（`crypto/rand`），并同时写入响应头 `X-JEV-Request-Id`，便于与上游日志对账。
 - **建议接口**：无新增（`/api/logs` 行内新增字段即可）。
 - **采集点**：`ServeHTTP` 入口生成并贯穿；响应头写入位置在 `writeBlocked`/`forward`/`forwardChecked` 三处需一致。
-- **降级策略（已落地）**：抽屉显示「未接入」并注明「仅持久化了 SQLite 自增 id」。
+- **降级策略（已落地，现已实施）**：抽屉显示「未接入」并注明「仅持久化了 SQLite 自增 id」。
+- **实现结果**：抽屉给出 `trace_id`，响应头 `X-JEV-Request-Id` 同步返回客户端。
 - **侵入范围**：`internal/config`、`internal/proxy`、`internal/admin`。**注意**：新增响应头属于对外可见的协议变化，需在 change 中评估客户端兼容性。
 
-### G8 完整原始请求体（**建议不补**）
+### G8 完整原始请求体（**建议不补**，界面标注已删除）
 
 - **界面元素**：审计抽屉「原始送检请求体 Raw JSON Payload」+「复制完整 JSON」。
 - **现状态**：按设计只保留截断后的 `snippet`。
@@ -268,13 +385,14 @@
 - **降级策略（已落地）**：抽屉显示「未接入」，注明「判定由单一阈值产生」。
 - **侵入范围**：`internal/config`（新表）、`internal/proxy`（评测入口）、`internal/admin`。
 
-### G14 密钥健康成功率
+### G14 密钥健康成功率 —— **已实施（`ok_calls` / `err_calls`，见「本轮已实施」）**
 
 - **界面元素**：配置视图每把密钥的「842.1k 次 · 99.98% OK」。
 - **现状态**：`jev_keys.calls` 有累计调用数（已如实展示），但没有成功/失败计数。
 - **建议模型**：`jev_keys.ok_calls INTEGER NOT NULL DEFAULT 0`、`jev_keys.err_calls INTEGER NOT NULL DEFAULT 0`。
 - **采集点**：`internal/jev/client.go` 的轮询/重试循环里，对最终成功与被判定为失败（非 401/429/529 的其它状态、网络错误、JSON 解析失败）分别自增。**注意**：401/429/529 会切到下一把密钥，属于「该密钥失败」而非整体失败，应记在前一把密钥上。
-- **降级策略（已落地）**：只显示真实累计调用次数与最近使用时间，成功率显示「未接入」。
+- **降级策略（已落地，现已实施）**：只显示真实累计调用次数与最近使用时间，成功率显示「未接入」。
+- **实现结果**：每把密钥显示成功率与「成功 N · 失败 M」，从未用过的显示 `—`；池整体成功率在第四格。
 - **侵入范围**：`internal/config`、`internal/jev`（`KeyProvider` 需新增计数回调，接口实现方在 `internal/server`）。
 
 ### G17 权重轮询
@@ -286,26 +404,28 @@
 - **降级策略（已落地）**：显示真实的「轮询分发 (Round-Robin)」徽章，并在旁标注权重配置「未接入」。
 - **侵入范围**：`internal/config`、`internal/jev`（选取算法）、`internal/admin`。
 
-### G18 永久封禁
+### G18 永久封禁 —— **已实施（`abuse_ban_permanent` + 持久规则，见「本轮已实施」）**
 
 - **界面元素**：配置视图封禁时长预设「永久」。
 - **现状态**：`abuse_ban_sec` 为秒数，`internal/abuse` 以「窗口内触发 → 封禁至 now+N 秒」实现，没有永久语义。
 - **建议语义**：约定 `abuse_ban_sec < 0` 表示永久；`internal/abuse.Banned()` 对永久封禁返回 `until = zero time`，界面显示「永久」；重启即清空（进程内计数器的既有性质，需在界面注明）。
 - **采集点**：`internal/abuse/tracker.go`（判断分支）、`internal/proxy` 的 429 响应正文（`writeBanned` 需处理 `until` 为零值时的文案）。
-- **降级策略（已落地）**：不提供「永久」预设，只给 10 分钟 / 1 小时 / 24 小时三档与自由秒数输入，并在旁注明原因。
+- **降级策略（已落地，现已实施）**：不提供「永久」预设，只给 10 分钟 / 1 小时 / 24 小时三档与自由秒数输入，并在旁注明原因。
+- **实现结果**：时长预设旁新增「同步写入永久封禁规则」开关（默认关），开启时额外写一条 `ip_rules` 持久规则。
 - **侵入范围**：`internal/abuse`、`internal/proxy`（仅文案分支）、`internal/config`（校验放行负数）。
 
 ---
 
 ## D 类：需要 `internal/proxy` 主链路埋点（侵入范围与兼容性）
 
-### G3 峰值流量 PPS
+### G3 峰值流量 PPS —— **已实施（改走 SQL 聚合，见「本轮已实施」）**
 
 - **界面元素**：驾驶舱横幅「峰值流量 PPS 842 req/s」。
 - **现状态**：无速率采集。
 - **建议实现**：进程内滑动窗口计数器（与 `internal/abuse` 同构，1 秒粒度、窗口 60 秒），在 `ServeHTTP` 入口计数；暴露 `GET /api/stats/throughput?window=60` → `{"current":12,"peak":842,"window_sec":60}`。
   另需一个低频（如 1 秒）ticker 采样当前速率以维护峰值——可复用同一 `internal/abuse` 风格的自有 goroutine，**不引入新进程**。
-- **降级策略（已落地）**：显示「未接入」徽章 + 「需要新增指标采集」。
+- **降级策略（已落地，现已实施）**：显示「未接入」徽章 + 「需要新增指标采集」。
+- **实现结果**：驾驶舱横幅显示真实峰值，数据来自 `Store.PeakPPS` 的 SQL 聚合，未引入常驻 goroutine。
 - **侵入范围**：`ServeHTTP` 入口一行计数（不改变任何判定/转发分支）。
 
 ### G9 地理位置
@@ -336,14 +456,15 @@
 
 ## F 类：写操作接口
 
-### G11 导出 CSV
+### G11 导出 CSV —— **已实施（`GET /api/logs/export`，见「本轮已实施」）**
 
 - **界面元素**：审计视图「导出 CSV 日志」。
 - **建议接口**：`GET /api/logs/export.csv?decision=&model=&q=&since=`（与 `/api/logs` 同参数，忽略 `limit/offset`，
   或支持 `limit` 上限 50000 并设 `Content-Disposition: attachment`）。
 - **实现要点**：`text/csv; charset=utf-8` + UTF-8 BOM（Excel 兼容）；逐行 `bufio.Writer` 流式输出，不整表入内存；
   字段做 CSV 转义；建议加 `audit_export` 级别的操作留痕（谁在何时导出了多少行）。
-- **降级策略（已落地）**：按钮不呈现，改以「未接入」徽章说明原因。
+- **降级策略（已落地，现已实施）**：按钮不呈现，改以「未接入」徽章说明原因。
+- **实现结果**：审计页头部有「导出 CSV」按钮，走 `GET /api/logs/export`，导出当前筛选条件下的全部记录（上限 20 万行）。
 - **侵入范围**：`internal/admin`（`internal/config` 复用 `LogFilter`）；导出留痕需新增表或复用 `logs`（建议新增 `admin_audit`）。
 
 ### G19 连通性测试

@@ -3,7 +3,10 @@
 package admin
 
 import (
+	"bufio"
+	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"path"
@@ -77,6 +80,9 @@ func New(store *config.Store, webFS fs.FS, info *Info, bans BanSnapshot, geo con
 	mux.HandleFunc("/api/ip-rules/", h.auth(h.ipRuleItem))
 	mux.HandleFunc("/api/logs", h.auth(h.logs))
 	mux.HandleFunc("/api/logs/models", h.auth(h.logModels))
+	// Exact pattern, and /api/logs/models is registered above it; net/http's
+	// ServeMux prefers the longer literal match, so neither shadows the other.
+	mux.HandleFunc("/api/logs/export", h.authQuery(h.logsExport))
 	mux.HandleFunc("/api/stats", h.auth(h.stats))
 	mux.HandleFunc("/api/stats/latency", h.auth(h.latency))
 	mux.HandleFunc("/api/stats/ip", h.auth(h.ipStats))
@@ -99,6 +105,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) { h.mux.Serv
 func (h *Handler) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !h.sess.valid(bearer(r)) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+// authQuery is auth with the export's query-token fallback (see bearerQuery).
+func (h *Handler) authQuery(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !h.sess.valid(bearerQuery(r)) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
@@ -377,12 +394,15 @@ func (h *Handler) ipRuleItem(w http.ResponseWriter, r *http.Request) {
 
 // --- logs & stats ---
 
-func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
+// logFilterFrom reads the audit filter set out of the query string. Shared by
+// the paged list, the model dropdown's scope is separate, and the CSV export so
+// all three agree on what a given set of query parameters means.
+func logFilterFrom(r *http.Request) config.LogFilter {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	since, _ := strconv.ParseInt(q.Get("since"), 10, 64)
-	entries, total, err := h.store.QueryLogs(config.LogFilter{
+	return config.LogFilter{
 		Limit:    limit,
 		Offset:   offset,
 		Decision: q.Get("decision"),
@@ -391,12 +411,117 @@ func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
 		IP:       strings.TrimSpace(q.Get("ip")),
 		Query:    strings.TrimSpace(q.Get("q")),
 		Since:    since,
-	})
+	}
+}
+
+func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
+	entries, total, err := h.store.QueryLogs(logFilterFrom(r))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"items": entries, "total": total})
+}
+
+// exportMaxRows bounds one CSV export. The console's own window selector goes
+// up to 30 days; at a busy gateway that is far more rows than a spreadsheet can
+// open, so the export stops at the cap and says so in the file itself rather
+// than silently handing back a different period than the filters asked for.
+const exportMaxRows = 200000
+
+// logsExport streams the audit log as CSV using the same filters as /api/logs.
+//
+// The response is written incrementally as rows come out of SQLite, so a large
+// export does not have to be materialised in memory. A UTF-8 BOM is emitted
+// first: without it Excel mis-detects the encoding and mangles the Chinese
+// reasons and snippets the log is mostly made of.
+//
+// `since` defaults to the last 24 hours when the caller gives none, so an
+// absent filter cannot pull the entire history in one request.
+func (h *Handler) logsExport(w http.ResponseWriter, r *http.Request) {
+	f := logFilterFrom(r)
+	if f.Since == 0 {
+		f.Since = time.Now().Add(-24 * time.Hour).UnixMilli()
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="jev-audit-`+time.Now().Format("20060102-150405")+`.csv"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+
+	bw := bufio.NewWriterSize(w, 32*1024)
+	_, _ = bw.WriteString("\xef\xbb\xbf") // UTF-8 BOM
+	cw := csv.NewWriter(bw)
+	cw.UseCRLF = true // RFC 4180 line endings; what Excel expects
+
+	header := []string{"时间", "请求ID", "方法", "路径", "类型", "判定", "分数", "模型",
+		"检定耗时(ms)", "转发耗时(ms)", "总耗时(ms)", "来源IP", "原因", "内容摘要"}
+	_ = cw.Write(header)
+
+	n := 0
+	truncated := false
+	err := h.store.StreamLogs(f, func(e config.LogEntry) error {
+		if n >= exportMaxRows {
+			truncated = true
+			return errStopExport
+		}
+		_ = cw.Write([]string{
+			e.TS.Format("2006-01-02 15:04:05.000"),
+			e.TraceID,
+			e.Method,
+			e.Path,
+			e.Kind,
+			e.Decision,
+			scoreCell(e.Score),
+			e.Model,
+			msCell(e.InspectMS),
+			msCell(e.UpstreamMS),
+			strconv.FormatInt(e.LatencyMS, 10),
+			e.IP,
+			e.Reason,
+			e.Snippet,
+		})
+		n++
+		return nil
+	})
+	if err != nil && err != errStopExport {
+		// Headers are already out, so the only honest signal left is a final row
+		// the spreadsheet will show, plus a log line for the operator.
+		logx.Debugf("audit export failed after %d rows: %v", n, err)
+		_ = cw.Write([]string{"# export failed", err.Error()})
+	} else if truncated {
+		_ = cw.Write([]string{"# truncated",
+			"导出达到上限 " + strconv.Itoa(exportMaxRows) + " 行，请缩小时间范围后重试"})
+	}
+	cw.Flush()
+	_ = bw.Flush()
+	// An export is a read of the whole audit trail by a logged-in operator, but
+	// it is also the one action that copies the log off the box — worth a line.
+	logx.Debugf("audit export: %d rows, since=%s, decision=%q model=%q ip=%q q=%q truncated=%v",
+		n, time.UnixMilli(f.Since).Format(time.RFC3339), f.Decision, f.Model, f.IP, f.Query, truncated)
+}
+
+// errStopExport unwinds StreamLogs once the row cap is reached.
+var errStopExport = errors.New("export row limit reached")
+
+// scoreCell renders a nullable score for the CSV. An unscored row (skip, error)
+// gets an empty cell so it is distinguishable from a genuine 0.
+func scoreCell(s *float64) string {
+	if s == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*s, 'f', -1, 64)
+}
+
+// msCell renders a nullable millisecond phase, empty when the phase never ran
+// (a request rejected by an IP rule has no forward leg, and no forward leg means
+// no first-byte time to report).
+func msCell(v *int64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatInt(*v, 10)
 }
 
 // logModels serves the model choices for the audit filter dropdown: the model
@@ -433,6 +558,18 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
 		return
 	}
+	// Peak requests per second over the window: the busiest single wall-clock
+	// second of the whole period, from the same rows the series is built on but
+	// aggregated in SQL instead of by scanning every row into buckets.
+	peakPPS, err := h.store.PeakPPS(since, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errBody(err.Error()))
+		return
+	}
+	// The equally long window immediately before this one, for the period-over-
+	// period deltas. Its own error is tolerated: a comparison is a nicety, and
+	// reporting the current window is better than failing the whole page.
+	previous, _ := h.store.StatsBetween(since.Add(-time.Duration(hours)*time.Hour), since)
 	// The existing aggregate fields keep their names and meaning; everything
 	// below is additive, so older clients of this endpoint are unaffected.
 	writeJSON(w, http.StatusOK, struct {
@@ -441,12 +578,16 @@ func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
 		Series        []config.StatBucket `json:"series"`
 		ScoreBuckets  []int64             `json:"score_buckets"`
 		Unscored      int64               `json:"unscored"`
+		PeakPPS       int64               `json:"peak_pps"`
+		Previous      config.Stats        `json:"previous"`
 	}{
 		Stats:         st,
 		BucketSeconds: bucketSeconds,
 		Series:        series,
 		ScoreBuckets:  hist.Counts,
 		Unscored:      hist.Unscored,
+		PeakPPS:       peakPPS,
+		Previous:      previous,
 	})
 }
 

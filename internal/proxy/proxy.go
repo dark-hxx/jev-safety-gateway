@@ -120,12 +120,41 @@ func (b *requestBody) reader() io.ReadCloser {
 	}{io.MultiReader(bytes.NewReader(b.prefix), b.rest), b.rest}
 }
 
+// auditRow is the audit row already written for the request in flight: its id,
+// its trace id, the inspect phase measured for it, and the request start. It is
+// handed to the forward paths so they can complete the row once the upstream has
+// answered (see completeRow); a row whose insert failed carries id 0 and every
+// completion is then a no-op.
+type auditRow struct {
+	id        int64
+	traceID   string
+	inspectMS int64
+	start     time.Time
+}
+
+// completeRow records the forward leg of row: the time to the upstream's first
+// byte and the resulting row total (inspect phase + that leg, so the audit
+// drawer's breakdown always adds up to the total). upstreamMS is nil when no
+// upstream response was received, in which case the row keeps the total it was
+// inserted with and its upstream_ms stays NULL — "not forwarded" rather than a
+// fabricated 0 ms.
+func (h *Handler) completeRow(row auditRow, upstreamMS *int64) {
+	if upstreamMS == nil {
+		return
+	}
+	h.store.UpdateLogForward(row.id, *upstreamMS, row.inspectMS+*upstreamMS)
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	// One id per request through the gateway, returned on every response path
+	// (set before anything can write a status, so blocks and bans carry it too).
+	traceID := newTraceID()
+	w.Header().Set(TraceHeader, traceID)
 	set := h.store.Settings()
 
 	ip := clientIP(r)
-	logx.Debugf("→ %s %s ip=%s ct=%q", r.Method, r.URL.Path, ip, r.Header.Get("Content-Type"))
+	logx.Debugf("→ %s %s ip=%s ct=%q trace=%s", r.Method, r.URL.Path, ip, r.Header.Get("Content-Type"), traceID)
 
 	if set.UpstreamBaseURL == "" {
 		http.Error(w, `{"error":{"message":"gateway upstream not configured"}}`, http.StatusBadGateway)
@@ -149,7 +178,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.store.AddLog(config.LogEntry{
 				TS: start, Method: r.Method, Path: r.URL.Path, Kind: "iprule",
 				Decision: "block", LatencyMS: time.Since(start).Milliseconds(),
-				IP: ip, Reason: reason,
+				IP: ip, Reason: reason, TraceID: traceID,
 			})
 			h.writeRuleBanned(w, permanent, until)
 			return
@@ -163,7 +192,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.store.AddLog(config.LogEntry{
 				TS: start, Method: r.Method, Path: r.URL.Path, Kind: "abuse",
 				Decision: "block", LatencyMS: time.Since(start).Milliseconds(),
-				IP: ip, Reason: "IP 因滥用被临时封禁至 " + until.Format("15:04:05"),
+				IP: ip, Reason: "IP 因滥用被临时封禁至 " + until.Format("15:04:05"), TraceID: traceID,
 			})
 			h.writeBanned(w, set, until)
 			return
@@ -197,23 +226,46 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if set.Enabled && set.AbuseEnabled && !allowlisted && decision == "block" && score != nil {
 		if tripped, until := h.abuse.Strike(ip, start, set.AbuseWindowSec, set.AbuseMaxHarmful, set.AbuseBanSec); tripped {
 			reason += "；已触发滥用封禁至 " + until.Format("15:04:05")
+			if set.AbuseBanPermanent {
+				// The in-memory ban is process-local and lasts abuse_ban_sec; the
+				// rule is what makes "permanent" mean it. It also lands in the IP
+				// rule pool, which is where an operator lifts it again.
+				rule, err := h.store.AddIPRule(ip, config.IPRuleBlock,
+					"滥用自动封禁（永久）：窗口内 "+strconv.Itoa(set.AbuseMaxHarmful)+" 次有害内容", nil)
+				if err != nil {
+					log.Printf("permanent abuse ban failed for %s: %v", ip, err)
+					reason += "；写入永久封禁规则失败：" + err.Error()
+				} else {
+					reason += "；已写入永久封禁规则（解封：「IP 风险分析」页删除该规则）"
+					logx.Debugf("  permanent abuse ban rule created for %s (rule %d)", ip, rule.ID)
+				}
+			}
 		}
 	}
 
-	// Log the outcome (best-effort).
-	h.store.AddLog(config.LogEntry{
-		TS:        start,
-		Method:    r.Method,
-		Path:      r.URL.Path,
-		Kind:      kind,
-		Decision:  decision,
-		Score:     score,
-		Model:     model,
-		LatencyMS: time.Since(start).Milliseconds(),
-		IP:        ip,
-		Reason:    reason,
-		Snippet:   auditSnippet(set, snippet),
-	})
+	// Log the outcome (best-effort); the id is kept so the forward paths can
+	// complete this row with the upstream leg.
+	inspectMS := time.Since(start).Milliseconds()
+	row := auditRow{
+		traceID:   traceID,
+		inspectMS: inspectMS,
+		start:     start,
+		id: h.store.AddLog(config.LogEntry{
+			TS:        start,
+			Method:    r.Method,
+			Path:      r.URL.Path,
+			Kind:      kind,
+			Decision:  decision,
+			Score:     score,
+			Model:     model,
+			LatencyMS: inspectMS,
+			InspectMS: &inspectMS,
+			IP:        ip,
+			Reason:    reason,
+			Snippet:   auditSnippet(set, snippet),
+			TraceID:   traceID,
+		}),
+	}
 
 	if decision == "block" {
 		if oversizeReject {
@@ -228,10 +280,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Response auditing buffers the full upstream reply (losing streaming); only
 	// used when explicitly enabled. Otherwise stream through transparently.
 	if set.Enabled && set.CheckResponse {
-		h.forwardChecked(w, r, start, set, body)
+		h.forwardChecked(w, r, set, body, row)
 		return
 	}
-	h.forward(w, r, set, body)
+	h.forward(w, r, set, body, row)
 }
 
 // decide runs the safety evaluation and returns the decision plus metadata.
@@ -477,13 +529,15 @@ func formatRetryAfter(until time.Time) string {
 
 // forward proxies the (approved) request to the upstream base URL, preserving
 // path, query, headers and streaming the response back.
-func (h *Handler) forward(w http.ResponseWriter, r *http.Request, set config.Settings, body *requestBody) {
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, set config.Settings, body *requestBody, row auditRow) {
 	target, err := url.Parse(set.UpstreamBaseURL)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"invalid upstream url"}}`, http.StatusBadGateway)
 		return
 	}
 
+	// Tested by the closures below, so it is declared before them.
+	var forwardStart time.Time
 	rp := &httputil.ReverseProxy{
 		FlushInterval: 100 * time.Millisecond, // stream SSE responses promptly
 		Director: func(req *http.Request) {
@@ -496,12 +550,20 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, set config.Set
 			// sent no Content-Length, so the request must stay chunked.
 			req.Body = body.reader()
 			req.ContentLength = body.size
+			// Start the forward clock here, in the same callback that hands the
+			// request to the transport.
+			forwardStart = time.Now()
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			// The gateway's verdict belongs on the response to the client, not on
 			// the request forwarded upstream.
 			resp.Header.Set("X-JEV-Gateway", "allow")
 			logx.Debugf("  ← upstream %d %s (stream passthrough)", resp.StatusCode, resp.Request.URL)
+			// This runs at response-header time, i.e. on the first byte. Completing
+			// the row here rather than after ServeHTTP returns keeps a long SSE
+			// stream from holding the row's timing open for its whole duration.
+			ttfb := time.Since(forwardStart).Milliseconds()
+			h.completeRow(row, &ttfb)
 			return nil
 		},
 		ErrorHandler: func(rw http.ResponseWriter, _ *http.Request, err error) {
@@ -540,7 +602,7 @@ func copyHeaders(dst, src http.Header) {
 
 // forwardChecked performs a buffered round-trip to the upstream, then audits the
 // response body with JEV before returning it. Used only when CheckResponse is on.
-func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start time.Time, set config.Settings, body *requestBody) {
+func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, set config.Settings, body *requestBody, row auditRow) {
 	target, err := url.Parse(set.UpstreamBaseURL)
 	if err != nil {
 		http.Error(w, `{"error":{"message":"invalid upstream url"}}`, http.StatusBadGateway)
@@ -560,6 +622,7 @@ func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start t
 	// Preserve the client's framing: -1 keeps the request chunked.
 	out.ContentLength = body.size
 
+	forwardStart := time.Now()
 	resp, err := h.http.Do(out)
 	if err != nil {
 		log.Printf("upstream request error: %v", err)
@@ -567,13 +630,22 @@ func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start t
 		return
 	}
 	defer resp.Body.Close()
+	// This path buffers the whole response, so the forward leg is the complete
+	// round trip rather than a first-byte time.
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody))
+	respForwardMS := time.Since(forwardStart).Milliseconds()
+	h.completeRow(row, &respForwardMS)
 	logx.Debugf("  ← upstream %d %s resp=%d bytes (buffered for audit)", resp.StatusCode, outURL.String(), len(respBody))
+
+	// The response audit is its own phase, and gets its own row: inspect_ms is
+	// the JEV evaluation of the response body, upstream_ms the buffered round
+	// trip that produced it.
 
 	// Only audit successful, textual responses; pass errors straight through.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		res := extract.Output(resp.Header.Get("Content-Type"), respBody)
 		if res.Checkable {
+			auditStart := time.Now()
 			stateText := extract.Clamp(res.Text, set.MaxStateChars)
 			key := cacheKey(set, stateText)
 			now := time.Now()
@@ -625,11 +697,13 @@ func (h *Handler) forwardChecked(w http.ResponseWriter, r *http.Request, start t
 				}
 			}
 
+			auditMS := time.Since(auditStart).Milliseconds()
 			h.store.AddLog(config.LogEntry{
-				TS: start, Method: r.Method, Path: r.URL.Path, Kind: "response",
+				TS: row.start, Method: r.Method, Path: r.URL.Path, Kind: "response",
 				Decision: decisionWord(blocked, jerr), Score: score,
-				LatencyMS: time.Since(start).Milliseconds(), IP: clientIP(r), Reason: reason,
+				LatencyMS: auditMS + respForwardMS, IP: clientIP(r), Reason: reason,
 				Snippet: auditSnippet(set, preview(res.Text, 200)),
+				TraceID: row.traceID, InspectMS: &auditMS, UpstreamMS: &respForwardMS,
 			})
 			if blocked {
 				h.writeBlocked(w, set, score)

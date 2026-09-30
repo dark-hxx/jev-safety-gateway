@@ -66,21 +66,27 @@ func (s *Store) migrate() error {
 			enabled    INTEGER NOT NULL DEFAULT 1,
 			calls      INTEGER NOT NULL DEFAULT 0,
 			last_used  INTEGER,
-			created_at INTEGER NOT NULL
+			created_at INTEGER NOT NULL,
+			ok_calls   INTEGER NOT NULL DEFAULT 0,
+			err_calls  INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS logs (
-			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			ts         INTEGER NOT NULL,
-			method     TEXT NOT NULL,
-			path       TEXT NOT NULL,
-			kind       TEXT NOT NULL,
-			decision   TEXT NOT NULL,
-			score      REAL,
-			model      TEXT NOT NULL DEFAULT '',
-			latency_ms INTEGER NOT NULL DEFAULT 0,
-			ip         TEXT NOT NULL DEFAULT '',
-			reason     TEXT NOT NULL DEFAULT '',
-			snippet    TEXT NOT NULL DEFAULT ''
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts          INTEGER NOT NULL,
+			method      TEXT NOT NULL,
+			path        TEXT NOT NULL,
+			kind        TEXT NOT NULL,
+			decision    TEXT NOT NULL,
+			score       REAL,
+			model       TEXT NOT NULL DEFAULT '',
+			latency_ms  INTEGER NOT NULL DEFAULT 0,
+			ip          TEXT NOT NULL DEFAULT '',
+			reason      TEXT NOT NULL DEFAULT '',
+			snippet     TEXT NOT NULL DEFAULT '',
+			trace_id    TEXT NOT NULL DEFAULT '',
+			inspect_ms  INTEGER,
+			upstream_ms INTEGER
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC)`,
 		// Covers the latency percentile query: both columns come from the index,
@@ -105,6 +111,30 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	// Additive columns for databases created by an earlier build. SQLite has no
+	// "ADD COLUMN IF NOT EXISTS", so each one is checked against the table first;
+	// every added column is nullable or carries a default, which is what lets an
+	// existing row (and an older binary reading the same file) keep working.
+	additive := []struct{ table, column, ddl string }{
+		{"logs", "trace_id", `ALTER TABLE logs ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`},
+		{"logs", "inspect_ms", `ALTER TABLE logs ADD COLUMN inspect_ms INTEGER`},
+		{"logs", "upstream_ms", `ALTER TABLE logs ADD COLUMN upstream_ms INTEGER`},
+		{"jev_keys", "ok_calls", `ALTER TABLE jev_keys ADD COLUMN ok_calls INTEGER NOT NULL DEFAULT 0`},
+		{"jev_keys", "err_calls", `ALTER TABLE jev_keys ADD COLUMN err_calls INTEGER NOT NULL DEFAULT 0`},
+		{"jev_keys", "last_error", `ALTER TABLE jev_keys ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, c := range additive {
+		has, err := s.hasColumn(c.table, c.column)
+		if err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+		if has {
+			continue
+		}
+		if _, err := s.db.Exec(c.ddl); err != nil {
+			return fmt.Errorf("migrate %s.%s: %w", c.table, c.column, err)
+		}
+	}
 	// Seed default settings if absent.
 	if _, err := s.getKV("settings"); errors.Is(err, sql.ErrNoRows) {
 		if err := s.saveSettings(DefaultSettings()); err != nil {
@@ -112,6 +142,26 @@ func (s *Store) migrate() error {
 		}
 	}
 	return nil
+}
+
+// hasColumn reports whether table already carries column, using the table_info
+// pragma (the only portable way to ask SQLite about a column).
+func (s *Store) hasColumn(table, column string) (bool, error) {
+	rows, err := s.db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (s *Store) load() error {
@@ -236,7 +286,8 @@ func maskKey(k string) string {
 // ListKeys returns all JEV keys (values masked).
 func (s *Store) ListKeys(reveal bool) ([]JEVKey, error) {
 	rows, err := s.db.Query(
-		`SELECT id,label,key,enabled,calls,last_used,created_at FROM jev_keys ORDER BY id`)
+		`SELECT id,label,key,enabled,calls,last_used,created_at,ok_calls,err_calls,last_error
+		 FROM jev_keys ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +298,8 @@ func (s *Store) ListKeys(reveal bool) ([]JEVKey, error) {
 		var enabled int
 		var lastUsed sql.NullInt64
 		var created int64
-		if err := rows.Scan(&k.ID, &k.Label, &k.Key, &enabled, &k.Calls, &lastUsed, &created); err != nil {
+		if err := rows.Scan(&k.ID, &k.Label, &k.Key, &enabled, &k.Calls, &lastUsed, &created,
+			&k.OKCalls, &k.ErrCalls, &k.LastError); err != nil {
 			return nil, err
 		}
 		k.Enabled = enabled == 1
@@ -314,21 +366,78 @@ func (s *Store) DeleteKey(id int64) error {
 	return err
 }
 
-// MarkKeyUsed increments the call counter for a key.
-func (s *Store) MarkKeyUsed(id int64) {
-	_, _ = s.db.Exec(`UPDATE jev_keys SET calls=calls+1,last_used=? WHERE id=?`,
-		time.Now().UnixMilli(), id)
+// MarkKeyResult records the outcome of one attempt made with a key: a success
+// bumps the call and success counters and refreshes last_used; a failure bumps
+// the call and failure counters and stores the message for diagnosis. Every
+// attempt counts, including the retryable ones (401/429/529, network errors)
+// that make the client rotate to the next key — the failure belongs to the key
+// that produced it. Failures are ignored (a key-health counter must never break
+// the evaluation path).
+func (s *Store) MarkKeyResult(id int64, ok bool, errMsg string) {
+	if ok {
+		_, _ = s.db.Exec(`UPDATE jev_keys SET calls=calls+1,ok_calls=ok_calls+1,last_used=? WHERE id=?`,
+			time.Now().UnixMilli(), id)
+		return
+	}
+	_, _ = s.db.Exec(`UPDATE jev_keys SET calls=calls+1,err_calls=err_calls+1,last_error=? WHERE id=?`,
+		truncateRunes(errMsg, 300), id)
+}
+
+// truncateRunes cuts s to at most n runes, so a long upstream error body cannot
+// bloat the key row (and the console's rendering of it).
+func truncateRunes(s string, n int) string {
+	if len(s) <= n { // byte length is an upper bound on rune count
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // --- logs ---
 
-// AddLog appends a request outcome. Failures are ignored (logging is best-effort).
-func (s *Store) AddLog(e LogEntry) {
-	_, _ = s.db.Exec(
-		`INSERT INTO logs(ts,method,path,kind,decision,score,model,latency_ms,ip,reason,snippet)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+// logColumns is the explicit column list every log read shares. Naming the
+// columns (rather than SELECT *) is what keeps an older binary working against
+// a database whose table gained columns.
+const logColumns = `id,ts,method,path,kind,decision,score,model,latency_ms,ip,reason,snippet,trace_id,inspect_ms,upstream_ms`
+
+// AddLog appends a request outcome and returns the new row id (0 when the insert
+// failed). Failures are ignored (logging is best-effort) — but the id is returned
+// so the caller can complete the row after forwarding with UpdateLogForward.
+func (s *Store) AddLog(e LogEntry) int64 {
+	res, err := s.db.Exec(
+		`INSERT INTO logs(ts,method,path,kind,decision,score,model,latency_ms,ip,reason,snippet,
+		                  trace_id,inspect_ms,upstream_ms)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.TS.UnixMilli(), e.Method, e.Path, e.Kind, e.Decision, nullFloat(e.Score),
-		e.Model, e.LatencyMS, e.IP, e.Reason, e.Snippet)
+		e.Model, e.LatencyMS, e.IP, e.Reason, e.Snippet,
+		e.TraceID, nullInt(e.InspectMS), nullInt(e.UpstreamMS))
+	if err != nil {
+		return 0
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+// UpdateLogForward completes a log row once the upstream leg is known: the time
+// to the upstream's first byte, and the row's total, which becomes the inspect
+// phase plus that leg. Rows that are never forwarded (blocked, banned) simply
+// keep the total they were inserted with, and their upstream_ms stays NULL.
+//
+// Best-effort like AddLog: the request has already been served by the time this
+// runs, so a failed update must not surface anywhere. A row id of 0 (the insert
+// failed) is a no-op.
+func (s *Store) UpdateLogForward(id int64, upstreamMS, totalMS int64) {
+	if id <= 0 {
+		return
+	}
+	_, _ = s.db.Exec(`UPDATE logs SET upstream_ms=?,latency_ms=? WHERE id=?`,
+		upstreamMS, totalMS, id)
 }
 
 func nullFloat(f *float64) interface{} {
@@ -336,6 +445,40 @@ func nullFloat(f *float64) interface{} {
 		return nil
 	}
 	return *f
+}
+
+func nullInt(v *int64) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+// scanLog decodes one log row selected with logColumns, from *sql.Row or *sql.Rows.
+func scanLog(sc interface{ Scan(...any) error }) (LogEntry, error) {
+	var e LogEntry
+	var ts int64
+	var score sql.NullFloat64
+	var inspect, upstream sql.NullInt64
+	if err := sc.Scan(&e.ID, &ts, &e.Method, &e.Path, &e.Kind, &e.Decision,
+		&score, &e.Model, &e.LatencyMS, &e.IP, &e.Reason, &e.Snippet,
+		&e.TraceID, &inspect, &upstream); err != nil {
+		return e, err
+	}
+	e.TS = time.UnixMilli(ts)
+	if score.Valid {
+		v := score.Float64
+		e.Score = &v
+	}
+	if inspect.Valid {
+		v := inspect.Int64
+		e.InspectMS = &v
+	}
+	if upstream.Valid {
+		v := upstream.Int64
+		e.UpstreamMS = &v
+	}
+	return e, nil
 }
 
 // LogFilter describes filtering and pagination for a log query. Zero-valued
@@ -358,20 +501,10 @@ type LogFilter struct {
 	Since    int64  // unix ms lower bound (ts >= Since); <=0 = no bound
 }
 
-// QueryLogs returns a page of log entries matching filter (newest first) plus
-// the total number of matching entries ignoring Limit/Offset. All user-supplied
-// values are bound as parameters to avoid SQL injection.
-func (s *Store) QueryLogs(f LogFilter) ([]LogEntry, int64, error) {
-	limit := f.Limit
-	if limit <= 0 || limit > 1000 {
-		limit = 50
-	}
-	offset := f.Offset
-	if offset < 0 {
-		offset = 0
-	}
-
-	// Shared WHERE clause + args for both the count and the page query.
+// logWhere builds the shared WHERE clause and bound arguments for a LogFilter.
+// All user-supplied values are bound as parameters to avoid SQL injection; the
+// caller appends LIMIT/OFFSET for a page query, or nothing for a stream.
+func logWhere(f LogFilter) (string, []interface{}) {
 	where := ""
 	args := []interface{}{}
 	add := func(cond string, val interface{}) {
@@ -406,6 +539,22 @@ func (s *Store) QueryLogs(f LogFilter) ([]LogEntry, int64, error) {
 	if f.Since > 0 {
 		add("ts>=?", f.Since)
 	}
+	return where, args
+}
+
+// QueryLogs returns a page of log entries matching filter (newest first) plus
+// the total number of matching entries ignoring Limit/Offset.
+func (s *Store) QueryLogs(f LogFilter) ([]LogEntry, int64, error) {
+	limit := f.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 50
+	}
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	where, args := logWhere(f)
 
 	var total int64
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs`+where, args...).Scan(&total); err != nil {
@@ -414,29 +563,45 @@ func (s *Store) QueryLogs(f LogFilter) ([]LogEntry, int64, error) {
 
 	pageArgs := append(append([]interface{}{}, args...), limit, offset)
 	rows, err := s.db.Query(
-		`SELECT id,ts,method,path,kind,decision,score,model,latency_ms,ip,reason,snippet FROM logs`+
-			where+` ORDER BY id DESC LIMIT ? OFFSET ?`, pageArgs...)
+		`SELECT `+logColumns+` FROM logs`+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
 	out := []LogEntry{}
 	for rows.Next() {
-		var e LogEntry
-		var ts int64
-		var score sql.NullFloat64
-		if err := rows.Scan(&e.ID, &ts, &e.Method, &e.Path, &e.Kind, &e.Decision,
-			&score, &e.Model, &e.LatencyMS, &e.IP, &e.Reason, &e.Snippet); err != nil {
+		e, err := scanLog(rows)
+		if err != nil {
 			return nil, 0, err
-		}
-		e.TS = time.UnixMilli(ts)
-		if score.Valid {
-			v := score.Float64
-			e.Score = &v
 		}
 		out = append(out, e)
 	}
 	return out, total, rows.Err()
+}
+
+// StreamLogs calls fn for every log entry matching filter, oldest first, without
+// loading the result set into memory — the CSV export path, where the response
+// is written out row by row anyway. It stops at the first error from fn (or from
+// the query) and returns it; Limit/Offset are ignored, so the caller is
+// responsible for bounding the window (see the export handler).
+func (s *Store) StreamLogs(f LogFilter, fn func(LogEntry) error) error {
+	where, args := logWhere(f)
+	rows, err := s.db.Query(
+		`SELECT `+logColumns+` FROM logs`+where+` ORDER BY id ASC`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		e, err := scanLog(rows)
+		if err != nil {
+			return err
+		}
+		if err := fn(e); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 // modelChoicesMax bounds the model dropdown: enough to be useful, small enough
@@ -493,10 +658,28 @@ func ipPrefix(s string) string {
 
 // StatsSince aggregates decisions since the given time.
 func (s *Store) StatsSince(since time.Time) (Stats, error) {
+	return s.statsBetween(since.UnixMilli(), 0)
+}
+
+// StatsBetween aggregates decisions in the half-open interval [from, to). It is
+// what the dashboard's period-over-period delta uses: the previous window is
+// [since-duration, since), which meets the current window exactly once at
+// `since` without double-counting the row on that boundary.
+func (s *Store) StatsBetween(from, to time.Time) (Stats, error) {
+	return s.statsBetween(from.UnixMilli(), to.UnixMilli())
+}
+
+func (s *Store) statsBetween(fromMS, toMS int64) (Stats, error) {
 	var st Stats
-	rows, err := s.db.Query(
-		`SELECT decision, COUNT(*) FROM logs WHERE ts>=? GROUP BY decision`,
-		since.UnixMilli())
+	q := `SELECT decision, COUNT(*) FROM logs WHERE ts>=?`
+	args := []interface{}{fromMS}
+	if toMS > 0 {
+		q += ` AND ts<?`
+		args = append(args, toMS)
+	}
+	q += ` GROUP BY decision`
+
+	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return st, err
 	}
@@ -520,6 +703,20 @@ func (s *Store) StatsSince(since time.Time) (Stats, error) {
 		}
 	}
 	return st, rows.Err()
+}
+
+// PeakPPS returns the busiest single second in [from, to] as a request count
+// (all decisions, since every request that reaches the gateway is logged). The
+// aggregation happens inside SQLite — one row per second, then a MAX — so the
+// whole window never travels into Go; the series query the dashboard already
+// runs pulls far more data than this.
+func (s *Store) PeakPPS(from, to time.Time) (int64, error) {
+	var peak int64
+	err := s.db.QueryRow(
+		`SELECT COALESCE(MAX(c), 0) FROM (
+		   SELECT COUNT(*) AS c FROM logs WHERE ts>=? AND ts<=? GROUP BY ts/1000)`,
+		from.UnixMilli(), to.UnixMilli()).Scan(&peak)
+	return peak, err
 }
 
 // latencySampleLimit caps how many log rows a latency query is allowed to sort.

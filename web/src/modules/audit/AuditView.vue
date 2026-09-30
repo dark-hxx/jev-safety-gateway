@@ -22,11 +22,12 @@ import type { LogEntry, ModelCount } from '../../types'
  * 精确才不会把 gpt-4o-mini 一起带出来）、来源 IP 为**前缀**匹配（完整地址与
  * `194.26.*` 都可用）、请求路径为**子串**匹配。
  *
- * 原型中依赖缺失后端的列与操作——地理位置、处置规则矩阵、全局请求唯一 ID、
- * 完整原始请求体、耗时分解、Token 估算与风险级、导出 CSV、重放测试——
- * 一律以降级态呈现或不予呈现：不显示无来源数值，也不提供无后端支撑的操作。
- * 「加入黑名单」原先也在这一清单里，现已由 `POST /api/ip-rules` 支撑，故作为
- * 处置入口提供（见 `banIp`）；重放测试仍然没有后端接口。
+ * 已落地的原型能力：处置入口「加入黑名单」（`POST /api/ip-rules`，见 `banIp`）、
+ * 全局请求唯一 ID 与耗时分解（`trace_id` 与 `inspect_ms` / `upstream_ms`，见详情抽屉）、
+ * CSV 导出（`GET /api/logs/export`，走与列表完全相同的筛选条件）。
+ * 仍然没有后端来源的是：地理位置（只落原始 IP，归属地在 IP 风险分析页离线解析）、
+ * Token 估算与风险级、处置规则矩阵、完整原始请求体、重放测试——这些不显示无来源
+ * 数值，也不提供无后端支撑的操作。
  *
  * 所有字段经 Vue 模板插值渲染，默认转义，等价于原实现的 `escapeHtml`，可防 XSS。
  */
@@ -103,16 +104,7 @@ async function load(): Promise<void> {
   loading.value = true
   loadError.value = ''
   try {
-    const res = await api.queryLogs({
-      limit: PAGE_SIZE,
-      offset: offset.value,
-      decision: decision.value,
-      model: model.value.trim(),
-      path: path.value.trim(),
-      ip: ip.value.trim(),
-      q: q.value.trim(),
-      since: sinceMs.value,
-    })
+    const res = await api.queryLogs(currentFilter())
     items.value = res.items ?? []
     total.value = res.total ?? 0
     // 记录在翻页途中被过滤/清理时，回到最后一个有效页。
@@ -127,6 +119,39 @@ async function load(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 当前筛选条件，列表查询与 CSV 导出共用同一套取值——导出的必须是屏幕上正在看的
+ * 那批记录，两处各拼一份参数迟早会漂移。
+ */
+function currentFilter(): api.LogFilter {
+  return {
+    limit: PAGE_SIZE,
+    offset: offset.value,
+    decision: decision.value,
+    model: model.value.trim(),
+    path: path.value.trim(),
+    ip: ip.value.trim(),
+    q: q.value.trim(),
+    since: sinceMs.value,
+  }
+}
+
+/**
+ * 导出当前筛选条件下的整份流水（不是当前页）。`limit` / `offset` 不参与导出。
+ *
+ * 触发方式交给浏览器：后端回 `Content-Disposition: attachment`，浏览器按它命名落盘，
+ * 所以不需要（也不应该）先把几十万行读进前端内存再自己造 Blob。`download` 属性置空串
+ * 表示「文件名以后端给的为准」。
+ */
+function exportCsv(): void {
+  const a = document.createElement('a')
+  a.href = api.logsExportURL(currentFilter())
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
 }
 
 /** 任一筛选控件变化：立即回到第 1 页，并对连续输入做 300ms 防抖。 */
@@ -301,7 +326,14 @@ onBeforeUnmount(() => {
         </p>
       </div>
       <div class="flex items-center gap-space-sm">
-        <NotConnected :reason="t('audit.noExport')" />
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-subheadline font-subheadline text-on-surface transition-all"
+          @click="exportCsv"
+        >
+          <Icon name="download" class="text-[16px]" />
+          <span>{{ t('audit.export') }}</span>
+        </button>
         <button
           type="button"
           class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-subheadline font-subheadline text-on-surface transition-all disabled:opacity-50"
@@ -663,8 +695,31 @@ onBeforeUnmount(() => {
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ score(selected.score) }}</dd>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.traceId') }}</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right break-all">{{ selected.trace_id || '-' }}</dd>
+              </div>
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
                 <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.latency') }}</dt>
                 <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">{{ selected.latency_ms }} ms</dd>
+              </div>
+              <!-- 耗时分解：检定阶段（读 body + 抽取 + JEV）与转发阶段（到上游首字节）。
+                   未转发的记录没有转发阶段，显示占位而不是 0——0 ms 会被读成「瞬间返回」。 -->
+              <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
+                <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.inspect') }}</dt>
+                <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">
+                  {{ selected.inspect_ms != null ? selected.inspect_ms + ' ms' : '-' }}
+                </dd>
+              </div>
+              <div class="flex flex-col gap-0.5 px-space-sm py-2">
+                <div class="flex items-start justify-between gap-space-sm">
+                  <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.upstream') }}</dt>
+                  <dd class="text-caption-1 font-caption-1 text-on-surface mono text-right">
+                    {{ selected.upstream_ms != null ? selected.upstream_ms + ' ms' : t('audit.field.notForwarded') }}
+                  </dd>
+                </div>
+                <span v-if="selected.upstream_ms != null" class="text-caption-2 font-caption-2 text-outline text-right">
+                  {{ t('audit.upstreamNote') }}
+                </span>
               </div>
               <div class="flex items-start justify-between gap-space-sm px-space-sm py-2">
                 <dt class="text-caption-1 font-caption-1 text-on-surface-variant shrink-0">{{ t('audit.field.ip') }}</dt>
@@ -684,33 +739,14 @@ onBeforeUnmount(() => {
             </dl>
           </div>
 
-          <!-- 未持久化字段：明确降级，不留空值也不编造 -->
+          <!-- 未持久化字段：明确降级，不留空值也不编造。地理位置是唯一一项：
+               审计只落原始来源 IP，归属地在「IP 风险分析」页离线解析。 -->
           <div class="flex flex-col gap-space-sm p-space-sm rounded-xl border border-dashed border-outline-variant/60">
             <span class="eyebrow">{{ t('audit.detail.notPersisted') }}</span>
             <div class="flex flex-col gap-space-xs">
               <div class="flex items-center justify-between gap-space-sm">
                 <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.geo') }}</span>
                 <NotConnected :reason="t('audit.missing.geoReason')" />
-              </div>
-              <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.traceId') }}</span>
-                <NotConnected :reason="t('audit.missing.traceIdReason')" />
-              </div>
-              <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.latencyBreakdown') }}</span>
-                <NotConnected :reason="t('audit.missing.latencyBreakdownReason')" />
-              </div>
-              <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.tokens') }}</span>
-                <NotConnected :reason="t('audit.missing.tokensReason')" />
-              </div>
-              <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.rules') }}</span>
-                <NotConnected :reason="t('audit.missing.rulesReason')" />
-              </div>
-              <div class="flex items-center justify-between gap-space-sm">
-                <span class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.missing.rawBody') }}</span>
-                <NotConnected :reason="t(snippetRecorded ? 'audit.missing.rawBodyOn' : 'audit.missing.rawBodyOff')" />
               </div>
             </div>
           </div>
@@ -737,7 +773,6 @@ onBeforeUnmount(() => {
             <Icon :name="actionMsg.ok ? 'check-circle' : 'alert-circle'" class="text-[14px]" />
             {{ actionMsg.text }}
           </span>
-          <span class="text-caption-2 font-caption-2 text-outline">{{ t('audit.action.replayNone') }}</span>
         </div>
       </aside>
     </Transition>

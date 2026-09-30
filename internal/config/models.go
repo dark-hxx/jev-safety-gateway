@@ -71,6 +71,13 @@ type Settings struct {
 	// all its requests are rejected without calling JEV.
 	AbuseBanSec int `json:"abuse_ban_sec"`
 
+	// AbuseBanPermanent makes a tripped ban durable: the proxy additionally writes
+	// a permanent block rule into ip_rules, so the IP is still rejected after a
+	// restart (the in-memory abuse ban itself is process-local and lasts
+	// AbuseBanSec). Off by default — this is an automatic ban made permanent by a
+	// heuristic, and it is only lifted by deleting the rule from the IP rule pool.
+	AbuseBanPermanent bool `json:"abuse_ban_permanent"`
+
 	// BlockMessage is returned (as JSON error body) when a request is blocked.
 	BlockMessage string `json:"block_message"`
 
@@ -118,28 +125,41 @@ func DefaultSettings() Settings {
 		RejectOversizeBody: false,
 		ExpandBase64:       true,
 		BlockMessage:       "请求内容被安全网关拦截 (blocked by JEV safety gateway).",
-		MaxStateChars:     16000,
-		JEVTimeoutMS:      8000,
-		AbuseEnabled:      true,
-		AbuseWindowSec:    60,
-		AbuseMaxHarmful:   5,
-		AbuseBanSec:       300,
-		RecordSnippet:     false,
-		DedupEnabled:      true,
-		DedupWindowSec:    60,
+		MaxStateChars:      16000,
+		JEVTimeoutMS:       8000,
+		AbuseEnabled:       true,
+		AbuseWindowSec:     60,
+		AbuseMaxHarmful:    5,
+		AbuseBanSec:        300,
+		RecordSnippet:      false,
+		DedupEnabled:       true,
+		DedupWindowSec:     60,
 	}
 }
 
 // JEVKey is one TypeSafe API key used in round-robin rotation.
 type JEVKey struct {
-	ID        int64     `json:"id"`
-	Label     string    `json:"label"`
-	Key       string    `json:"key"`     // full value; masked on list responses
-	Masked    string    `json:"masked"`  // e.g. apikey_2112…445e75
-	Enabled   bool      `json:"enabled"`
-	Calls     int64     `json:"calls"`
+	ID        int64      `json:"id"`
+	Label     string     `json:"label"`
+	Key       string     `json:"key"`    // full value; masked on list responses
+	Masked    string     `json:"masked"` // e.g. apikey_2112…445e75
+	Enabled   bool       `json:"enabled"`
+	Calls     int64      `json:"calls"`
 	LastUsed  *time.Time `json:"last_used,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time  `json:"created_at"`
+
+	// OKCalls/ErrCalls split Calls by outcome, so the console can show a success
+	// rate per key. Every attempt is charged to the key that made it, including a
+	// retryable failure (401/429/529 or a network error) — that is precisely the
+	// key's own failure, and it is what the next key in the rotation was picked
+	// for. Both are 0 for a key that has not been tried yet, and the console then
+	// shows no rate rather than a fabricated 0%.
+	OKCalls  int64 `json:"ok_calls"`
+	ErrCalls int64 `json:"err_calls"`
+	// LastError is the message of the most recent failed attempt (truncated), kept
+	// for diagnosis. It never contains the key value: failures are reported by
+	// status code and response snippet only.
+	LastError string `json:"last_error,omitempty"`
 }
 
 // LogEntry records the outcome of one filtered request for the admin UI.
@@ -156,6 +176,25 @@ type LogEntry struct {
 	IP        string    `json:"ip"`
 	Reason    string    `json:"reason"`
 	Snippet   string    `json:"snippet"`
+
+	// TraceID identifies this request gateway-wide: "req_" plus 12 hex digits,
+	// generated per request and also returned to the client as the
+	// X-JEV-Request-Id response header, so a client-side report can be matched to
+	// its audit row. Empty on rows written before this column existed.
+	TraceID string `json:"trace_id"`
+
+	// InspectMS is the pre-forward phase of this row: body read, extraction and
+	// (except for skip rows) the JEV evaluation. Nil only on rows that never got
+	// that far — a request rejected by an IP rule or an abuse ban.
+	InspectMS *int64 `json:"inspect_ms,omitempty"`
+
+	// UpstreamMS is the forward phase, measured from the request to the upstream
+	// response's first byte. It is the first-byte time, not the whole exchange: on
+	// the streaming path the body keeps arriving long after the client has its
+	// response, and timing that would drag a 60-second SSE reply into the latency
+	// percentiles. Nil when the request was never forwarded (blocked, banned, or
+	// the upstream failed before responding).
+	UpstreamMS *int64 `json:"upstream_ms,omitempty"`
 }
 
 // Stats is a small aggregate for the dashboard.
@@ -197,8 +236,9 @@ type ScoreHistogram struct {
 const ScoreSlots = 5
 
 // LatencyStats is the latency distribution of the window, from the single
-// whole-request duration each log row carries (see AuditView: the gateway
-// records one total, not a per-stage split).
+// whole-request duration each log row carries (LogEntry.LatencyMS: the
+// pre-forward phase plus, once the upstream has answered, the time to its first
+// byte). The per-phase split is on the row itself (InspectMS/UpstreamMS).
 //
 // Sampled is set when the window held more rows than the store is willing to
 // sort: the percentiles are then computed from a time-uniform sample, so they

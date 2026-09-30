@@ -33,7 +33,7 @@ func (staticKeys) EnabledKeys() ([]jev.Key, error) {
 	return []jev.Key{{ID: 1, Key: "test-key"}}, nil
 }
 
-func (staticKeys) MarkKeyUsed(int64) {}
+func (staticKeys) MarkKeyResult(int64, bool, string) {}
 
 // newAuditHandler builds a handler backed by a real store plus a JEV client with
 // a working key pool, and returns the store so tests can read back the audit

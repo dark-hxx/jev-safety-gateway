@@ -18,8 +18,12 @@ import (
 type KeyProvider interface {
 	// EnabledKeys returns id/value pairs of enabled keys in stable order.
 	EnabledKeys() ([]Key, error)
-	// MarkKeyUsed records that a key handled a request.
-	MarkKeyUsed(id int64)
+	// MarkKeyResult records the outcome of one attempt made with a key. Every
+	// attempt is reported, including the retryable failures (401/429/529 or a
+	// network error) that send the caller to the next key: that failure is the
+	// key's own, and it is the reason the rotation exists. errMsg is empty on
+	// success and is otherwise the failure message.
+	MarkKeyResult(id int64, ok bool, errMsg string)
 }
 
 // Key is a single JEV API key.
@@ -115,9 +119,12 @@ func (c *Client) Score(ctx context.Context, p Params) (float64, error) {
 		k := keys[(start+i)%len(keys)]
 		score, retry, err := c.callOnce(ctx, url, k, body, timeout)
 		if err == nil {
-			c.keys.MarkKeyUsed(k.ID)
+			c.keys.MarkKeyResult(k.ID, true, "")
 			return score, nil
 		}
+		// Charge the failure to the key that produced it — including a retryable
+		// one, which is precisely the case the rotation is there to handle.
+		c.keys.MarkKeyResult(k.ID, false, err.Error())
 		lastErr = err
 		if !retry {
 			return 0, err

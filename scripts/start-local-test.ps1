@@ -50,6 +50,10 @@
 .PARAMETER DbPath
     数据库路径，默认仓库根目录的 data\jev-safety-gateway.db。相对路径按仓库根目录解析。
 
+.PARAMETER NoGeoip
+    不启用仓库 data\ 下的 GeoIP 测试库。默认启用（存在哪个用哪个），用于在本地看到
+    「IP 风险分析」页的国家/ASN 面板出数而不是「未接入」。
+
 .EXAMPLE
     .\scripts\start-local-test.ps1
 
@@ -77,7 +81,8 @@ param(
     [switch]$NoZip,
     [string]$ProxyAddr = ':8080',
     [string]$AdminAddr = '127.0.0.1:8081',
-    [string]$DbPath = ''
+    [string]$DbPath = '',
+    [switch]$NoGeoip
 )
 
 Set-StrictMode -Version Latest
@@ -187,6 +192,40 @@ $env:JEV_DB_PATH = if ([System.IO.Path]::IsPathRooted($DbPath)) {
 }
 
 Write-Info "数据库：$env:JEV_DB_PATH"
+
+# GeoIP：仓库 data\ 下带着两个最小测试库（覆盖 TEST-NET 文档段，见 .gitignore 里 *.mmdb 不入库）。
+# 同样必须在启动前显式写进环境变量——包内 .env 同名键的优先级更高，所以 .env.example 里
+# 这两项默认是注释掉的（docker 侧由 compose 的默认值兜底，不靠本文件）。
+# 只接管库文件确实存在的那个维度；写空串等于关闭该维度，缺哪个哪个面板就照旧「未接入」。
+$geoipDbNames = [ordered]@{
+    JEV_GEOIP_COUNTRY_DB = 'GeoLite2-Country.mmdb'
+    JEV_GEOIP_ASN_DB     = 'GeoLite2-ASN.mmdb'
+}
+$geoipUsed = @()
+foreach ($geoipVar in $geoipDbNames.Keys) {
+    # 用显式 API 读，不用 $env:$name —— 后者拼不出动态名字，StrictMode 下也不安全。
+    $already = [Environment]::GetEnvironmentVariable($geoipVar, 'Process')
+    if ($NoGeoip -or -not [string]::IsNullOrWhiteSpace($already)) { continue }
+    $geoipFile = Join-Path $repoRoot ("data\{0}" -f $geoipDbNames[$geoipVar])
+    if (Test-Path -LiteralPath $geoipFile) {
+        [Environment]::SetEnvironmentVariable($geoipVar, $geoipFile, 'Process')
+        $geoipUsed += $geoipDbNames[$geoipVar]
+    }
+}
+Write-Info ("GeoIP：  " + $(if ($geoipUsed.Count) { "$($geoipUsed -join ' + ')（仓库 data\）" } else { '未启用，面板显示「未接入」' }))
+
+# 旧版 .env.example 把这两项写死成容器内路径（/geoip/…），照抄生成的包内 .env 会覆盖上面
+# 刚设好的值，让面板停在「未接入」。点破它，免得误判成本次改动没生效。
+$pkgEnv = Join-Path $pkgDir '.env'
+if ($geoipUsed.Count -and (Test-Path -LiteralPath $pkgEnv)) {
+    foreach ($geoipVar in $geoipDbNames.Keys) {
+        if (Select-String -LiteralPath $pkgEnv -Pattern ("^\s*{0}\s*=" -f [regex]::Escape($geoipVar)) -Quiet) {
+            Write-Host "注意：测试包 .env 里另有 $geoipVar，它会覆盖本次设置（值可能是容器内路径 /geoip/…）。" -ForegroundColor Yellow
+            Write-Host "      在包内 .env 里注释掉该行，或重跑加 -RefreshEnv 重新生成 .env。" -ForegroundColor Yellow
+        }
+    }
+}
+
 Write-Step "启动网关（$startScript）"
 & $startScript -ProxyAddr $ProxyAddr -AdminAddr $AdminAddr
 exit (Get-LastExitCode)

@@ -163,6 +163,9 @@ const ICONS: Record<string, string> = {
   'trending-up': `
     <path d="M3.4 17.4l5.7-5.7 3.9 3.9 7.6-7.6"/>
     <path d="M15.6 8h5v5"/>`,
+  'trending-down': `
+    <path d="M3.4 6.6l5.7 5.7 3.9-3.9 7.6 7.6"/>
+    <path d="M15.6 16h5v-5"/>`,
   'arrow-up-right': `
     <path d="M7 17L17 7"/>
     <path d="M8.4 7H17v8.6"/>`,

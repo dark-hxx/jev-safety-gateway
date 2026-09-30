@@ -19,7 +19,7 @@ import (
 type nopKeys struct{}
 
 func (nopKeys) EnabledKeys() ([]jev.Key, error) { return nil, nil }
-func (nopKeys) MarkKeyUsed(int64)               {}
+func (nopKeys) MarkKeyResult(int64, bool, string) {}
 
 func newTestHandler(t *testing.T, set config.Settings) *Handler {
 	t.Helper()
