@@ -291,7 +291,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="w-full px-margin py-margin flex flex-col gap-space-lg">
+  <div class="w-full px-margin-mobile py-margin-mobile md:px-margin md:py-margin flex flex-col gap-space-lg">
     <!-- 页头 -->
     <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-space-md">
       <div class="flex flex-col gap-1">

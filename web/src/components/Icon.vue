@@ -151,6 +151,7 @@ const ICONS: Record<string, string> = {
     <path d="M9.6 19.2v1.6M14.4 19.2v1.6"/>
     <path d="M9.6 12.6h.01M14.4 12.6h.01"/>`,
   'caret-down': '<path d="M7.4 10.2l4.6 4.6 4.6-4.6z"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   x: '<path d="M6.2 6.2l11.6 11.6M17.8 6.2L6.2 17.8"/>',
   zap: '<path d="M13.2 2.6L4.8 13.6h6.1l-1 7.8 8.4-11h-6.1z"/>',
   loader: `

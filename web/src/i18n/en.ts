@@ -37,6 +37,9 @@ export const en: Record<MessageKey, string> = {
   'shell.filteringOff': 'Filtering off',
   'shell.masterSwitch': 'Master gateway protection',
   'shell.logout': 'Sign out',
+  // Open/close buttons for the narrow-screen navigation drawer (hidden at ≥lg)
+  'shell.openNav': 'Open navigation',
+  'shell.closeNav': 'Close navigation',
 
   // --- Common states ---
   'notconnected.label': 'Not connected',

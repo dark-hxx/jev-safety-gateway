@@ -148,7 +148,7 @@ const latencyCaption = computed(() => {
 </script>
 
 <template>
-  <div class="w-full px-margin py-margin flex flex-col gap-space-lg">
+  <div class="w-full px-margin-mobile py-margin-mobile md:px-margin md:py-margin flex flex-col gap-space-lg">
     <!-- 环境辉光（纯装饰，无数据含义） -->
     <div class="relative w-full">
       <div class="absolute -top-12 -left-20 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none -z-10"></div>

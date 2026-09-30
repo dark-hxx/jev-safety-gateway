@@ -40,6 +40,9 @@ export const zh = {
   'shell.filteringOff': '过滤已关闭',
   'shell.masterSwitch': '主网关防护',
   'shell.logout': '退出',
+  // 窄屏导航抽屉的开/关按钮（≥lg 不显示，它们只服务 <lg 的抽屉）
+  'shell.openNav': '打开导航',
+  'shell.closeNav': '关闭导航',
 
   // --- 通用状态 ---
   'notconnected.label': '未接入',
