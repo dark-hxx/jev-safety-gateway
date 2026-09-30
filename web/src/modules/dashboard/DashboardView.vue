@@ -360,13 +360,25 @@ const latencyCaption = computed(() => {
 
         <TrendChart :series="series" :bucket-seconds="bucketSeconds" :loaded="loaded" />
 
+        <!-- 底注行：左侧是区间小结、右侧是接口字面量，实测这一行在常见窗口宽度下**已经排满**
+             （可用宽度只比内容多几十像素）。因此刷新指示不能是「按需插入的文字」：临时多出一个
+             「（刷新中…）」会把小结挤到第二行——卡片瞬时撑高 18px，整个 grid 行与下方内容
+             下沉再弹回，就是那下「抽搐」（间隔 5s，正是轮询周期）。
+
+             这里换成**常驻占位**的小转圈：它一直在版面上（空闲时只是 `invisible`），宽度与
+             是否在刷新无关，所以刷新前后这一行的折行点、行高完全一致；说明文字留给读屏
+             （`sr-only` 脱离文档流，不占版面）。不采用「宁可折行也不省略」的截断方案——
+             那会在英文字符更长、窗口较窄时把「拦截 N 次」截掉。 -->
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-xs pt-space-md text-caption-1 font-caption-1 text-on-surface-variant">
           <div class="flex items-center gap-1.5" :class="loadError ? 'text-error' : ''">
             <Icon :name="loadError ? 'alert-circle' : 'check-circle'" class="text-[16px]" :class="loadError ? 'text-error' : 'text-secondary'" />
             <span v-if="loadError">{{ t('dash.trendError', { msg: loadError }) }}</span>
             <span v-else>
               {{ t('dash.trendSummary', { range: rangeText, allowed: num(stats.allowed), blocked: num(stats.blocked) }) }}
-              <span v-if="loading" class="text-outline">{{ t('dash.refreshing') }}</span>
+            </span>
+            <span class="shrink-0 inline-flex items-center">
+              <Icon name="loader" class="text-[14px] text-outline" :class="loading ? 'animate-spin' : 'invisible'" />
+              <span v-if="loading" class="sr-only">{{ t('dash.refreshing') }}</span>
             </span>
           </div>
           <span class="font-code-body text-code-body text-outline mono">
