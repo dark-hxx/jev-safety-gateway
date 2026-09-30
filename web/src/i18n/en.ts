@@ -235,7 +235,7 @@ export const en: Record<MessageKey, string> = {
   'audit.col.ip': 'Source IP',
   'audit.col.reason': 'Reason',
   'audit.col.snippet': 'Snippet',
-  'audit.col.details': 'Details',
+  'audit.col.actions': 'Actions',
   'audit.empty': 'No records',
   'audit.emptyFiltered': 'No audit records match the current filters.',
   'audit.emptyNone': 'The gateway has not produced any audit records yet.',
@@ -274,7 +274,16 @@ export const en: Record<MessageKey, string> = {
   'audit.missing.rawBody': 'Full raw request body',
   'audit.missing.rawBodyOn': 'Raw payloads are not persisted by design; only the truncated inspection snippet is kept.',
   'audit.missing.rawBodyOff': 'Raw payloads are not persisted by design; snippet recording is currently off, so the log holds no inspected text at all.',
-  'audit.noActions': 'Blacklisting and replay testing have no backend endpoints, so no action buttons are offered. To block a source, lower the threshold or find the record here and handle it on the operations side.',
+  // Actions: one-click source-IP ban (POST /api/ip-rules, fixed 1-hour temporary ban)
+  'audit.action.section': 'Actions',
+  'audit.action.ban': 'Ban source IP {ip}',
+  'audit.action.banButton': 'Ban this source IP',
+  'audit.action.banNoIp': 'This record has no source IP, so it cannot be banned.',
+  'audit.action.banReason': 'Manual ban from audit trail',
+  'audit.action.banConfirm': 'Add source {ip} to the ban rules? Bans for 1 hour by default — adjust the duration or remove it in the rule pool on the IP risk page.',
+  'audit.action.banOk': 'Banned {ip} (1 hour)',
+  'audit.action.banFail': 'Ban failed: {msg}',
+  'audit.action.replayNone': 'Replay testing has no backend endpoint, so no entry point is offered.',
 
   // --- Settings ---
   'settings.title': 'Gateway & Security Settings',

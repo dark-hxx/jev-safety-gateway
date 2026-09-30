@@ -238,7 +238,7 @@ export const zh = {
   'audit.col.ip': '来源 IP',
   'audit.col.reason': '原因',
   'audit.col.snippet': '送检摘要',
-  'audit.col.details': '详情',
+  'audit.col.actions': '操作',
   'audit.empty': '暂无记录',
   'audit.emptyFiltered': '当前筛选条件没有匹配的审计记录。',
   'audit.emptyNone': '网关尚未产生审计记录。',
@@ -277,7 +277,16 @@ export const zh = {
   'audit.missing.rawBody': '完整原始请求体',
   'audit.missing.rawBodyOn': '按设计不持久化原始载荷，仅保留截断后的送检摘要。',
   'audit.missing.rawBodyOff': '按设计不持久化原始载荷；当前已关闭送检摘要记录，日志中不含任何送检文本。',
-  'audit.noActions': '加入黑名单、重放测试无对应后端接口，因此不提供操作入口；如需封禁某来源，可调低阈值或在审计记录中定位后于运维侧处理。',
+  // 处置：一键封禁来源 IP（POST /api/ip-rules，固定 1 小时临时封禁）
+  'audit.action.section': '处置',
+  'audit.action.ban': '封禁来源 IP {ip}',
+  'audit.action.banButton': '封禁此来源 IP',
+  'audit.action.banNoIp': '该记录没有来源 IP，无法封禁。',
+  'audit.action.banReason': '审计流水手动封禁',
+  'audit.action.banConfirm': '将来源 {ip} 加入封禁规则？默认封禁 1 小时，可在「IP 风险分析」页的规则池调整时长或删除。',
+  'audit.action.banOk': '已封禁 {ip}（1 小时）',
+  'audit.action.banFail': '封禁失败：{msg}',
+  'audit.action.replayNone': '重放测试无对应后端接口，因此不提供操作入口。',
 
   // --- 配置 ---
   'settings.title': '网关与安全策略配置',

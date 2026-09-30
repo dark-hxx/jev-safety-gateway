@@ -23,8 +23,10 @@ import type { LogEntry, ModelCount } from '../../types'
  * `194.26.*` 都可用）、请求路径为**子串**匹配。
  *
  * 原型中依赖缺失后端的列与操作——地理位置、处置规则矩阵、全局请求唯一 ID、
- * 完整原始请求体、耗时分解、Token 估算与风险级、导出 CSV、加入黑名单、重放测试——
+ * 完整原始请求体、耗时分解、Token 估算与风险级、导出 CSV、重放测试——
  * 一律以降级态呈现或不予呈现：不显示无来源数值，也不提供无后端支撑的操作。
+ * 「加入黑名单」原先也在这一清单里，现已由 `POST /api/ip-rules` 支撑，故作为
+ * 处置入口提供（见 `banIp`）；重放测试仍然没有后端接口。
  *
  * 所有字段经 Vue 模板插值渲染，默认转义，等价于原实现的 `escapeHtml`，可防 XSS。
  */
@@ -83,6 +85,9 @@ const total = ref(0)
 const loading = ref(false)
 const loadError = ref('')
 const selected = ref<LogEntry | null>(null)
+
+/** 处置（一键封禁）的反馈。列表卡头与详情抽屉共用同一条，两处入口都能看到结果。 */
+const actionMsg = ref<{ text: string; ok: boolean } | null>(null)
 
 const pages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)))
 const page = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1)
@@ -236,6 +241,43 @@ function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && selected.value) closeDetail()
 }
 
+// --- 处置 ---
+
+/** 反馈消息的自动消退计时器；卸载时清掉，避免在已销毁的组件上写状态。 */
+let actionTimer: number | undefined
+
+function flashAction(text: string, ok: boolean): void {
+  if (actionTimer !== undefined) window.clearTimeout(actionTimer)
+  actionMsg.value = { text, ok }
+  actionTimer = window.setTimeout(() => (actionMsg.value = null), 6000)
+}
+
+/**
+ * 一键封禁来源 IP：固定 1 小时临时封禁，与「IP 风险分析」排行表的快捷封禁同语义。
+ * 后端 `POST /api/ip-rules` 对同一 pattern+kind 是刷新而非重复插入，重复点击不会堆规则。
+ *
+ * 永久封禁与自定义时长不在这一页做——规则池（IP 风险分析页）是权威视图，
+ * 且在列表里判断「该 IP 是否已在封禁中」需要 CIDR 匹配，前端做不可靠，故不做状态标记。
+ */
+async function banIp(ip: string): Promise<void> {
+  const target = ip.trim()
+  if (!target) return
+  if (!window.confirm(t('audit.action.banConfirm', { ip: target }))) return
+  actionMsg.value = null
+  try {
+    await api.addIpRule({
+      pattern: target,
+      kind: 'block',
+      reason: t('audit.action.banReason'),
+      permanent: false,
+      duration_sec: 3600,
+    })
+    flashAction(t('audit.action.banOk', { ip: target }), true)
+  } catch (e) {
+    flashAction(t('audit.action.banFail', { msg: e instanceof Error ? e.message : String(e) }), false)
+  }
+}
+
 onMounted(() => {
   void load()
   void loadModels()
@@ -243,6 +285,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (debounceTimer !== undefined) window.clearTimeout(debounceTimer)
+  if (actionTimer !== undefined) window.clearTimeout(actionTimer)
   window.removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -406,6 +449,14 @@ onBeforeUnmount(() => {
           <span v-if="loading" class="text-caption-2 font-caption-2 text-outline">{{ t('audit.querying') }}</span>
         </div>
         <div class="flex items-center gap-space-sm">
+          <span
+            v-if="actionMsg"
+            class="inline-flex items-center gap-1 text-caption-1 font-caption-1"
+            :class="actionMsg.ok ? 'text-secondary' : 'text-error'"
+          >
+            <Icon :name="actionMsg.ok ? 'check-circle' : 'alert-circle'" class="text-[14px]" />
+            {{ actionMsg.text }}
+          </span>
           <span v-if="loadError" class="text-caption-1 font-caption-1 text-error">{{ loadError }}</span>
           <span v-else class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.totalRecords', { n: num(total) }) }}</span>
         </div>
@@ -425,7 +476,7 @@ onBeforeUnmount(() => {
               <th class="px-space-sm py-2.5 font-medium whitespace-nowrap">{{ t('audit.col.ip') }}</th>
               <th class="px-space-sm py-2.5 font-medium">{{ t('audit.col.reason') }}</th>
               <th class="px-space-sm py-2.5 font-medium min-w-[14rem]">{{ t('audit.col.snippet') }}</th>
-              <th class="px-space-sm py-2.5"><span class="sr-only">{{ t('audit.col.details') }}</span></th>
+              <th class="px-space-sm py-2.5"><span class="sr-only">{{ t('audit.col.actions') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -476,7 +527,21 @@ onBeforeUnmount(() => {
                 <span class="text-caption-1 font-caption-1 text-on-surface-variant line-clamp-2 break-all">{{ e.snippet || (snippetRecorded ? '-' : snippetPlaceholder) }}</span>
               </td>
               <td class="px-space-sm py-2.5 text-right">
-                <Icon name="chevron-right" class="text-outline text-[16px]" />
+                <span class="inline-flex items-center gap-1">
+                  <!-- 该行本身可点开详情，按钮必须 stop，否则点封禁会顺带打开抽屉。
+                       没有来源 IP 的记录（如本地/健康检查流量）不给入口。 -->
+                  <button
+                    v-if="e.ip"
+                    type="button"
+                    class="inline-flex items-center justify-center p-1 rounded-lg text-error hover:bg-error-container transition-colors"
+                    :title="t('audit.action.ban', { ip: e.ip })"
+                    :aria-label="t('audit.action.ban', { ip: e.ip })"
+                    @click.stop="banIp(e.ip)"
+                  >
+                    <Icon name="ban" class="text-[15px]" />
+                  </button>
+                  <Icon name="chevron-right" class="text-outline text-[16px]" />
+                </span>
               </td>
             </tr>
           </tbody>
@@ -651,11 +716,28 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- 原型中的操作：后端无支撑，不提供可执行按钮 -->
+        <!-- 处置：一键封禁来源 IP，走与「IP 风险分析」页规则池同一个接口 -->
         <div class="px-space-md py-space-sm border-t border-hairline flex flex-col gap-space-xs">
-          <span class="text-caption-2 font-caption-2 text-outline">
-            {{ t('audit.noActions') }}
+          <span class="eyebrow">{{ t('audit.action.section') }}</span>
+          <button
+            v-if="selected.ip"
+            type="button"
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-error-container hover:bg-error-container/80 text-caption-1 font-caption-1 text-error transition-colors"
+            @click="banIp(selected.ip)"
+          >
+            <Icon name="ban" class="text-[15px]" />
+            <span>{{ t('audit.action.banButton') }}</span>
+          </button>
+          <span v-else class="text-caption-1 font-caption-1 text-on-surface-variant">{{ t('audit.action.banNoIp') }}</span>
+          <span
+            v-if="actionMsg"
+            class="inline-flex items-center gap-1 text-caption-1 font-caption-1"
+            :class="actionMsg.ok ? 'text-secondary' : 'text-error'"
+          >
+            <Icon :name="actionMsg.ok ? 'check-circle' : 'alert-circle'" class="text-[14px]" />
+            {{ actionMsg.text }}
           </span>
+          <span class="text-caption-2 font-caption-2 text-outline">{{ t('audit.action.replayNone') }}</span>
         </div>
       </aside>
     </Transition>
