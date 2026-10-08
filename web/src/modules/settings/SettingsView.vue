@@ -529,6 +529,55 @@ const blockRule = computed(() =>
           </div>
         </div>
 
+        <!-- 路径门禁：只放行已知的 LLM 接口面，其余路径直接拒绝，不读 body、不送检、
+             不到上游。默认关闭是刻意的：升级时 load() 把存储的 blob 叠在默认值上，
+             新增字段会直接取到默认值，默认开启等于发布即静默改变现网行为。 -->
+        <div class="flex flex-col gap-space-sm p-space-md rounded-xl bg-surface-container-low/70 shadow-inset">
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input v-model="form.path_allowlist_enabled" type="checkbox" class="mt-0.5 accent-primary" />
+            <span class="flex flex-col gap-0.5">
+              <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface">
+                {{ t('settings.pathAllowlist') }}
+                <HintTip :text="t('settings.pathAllowlistTip')" />
+              </span>
+              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.pathAllowlistHint') }}</span>
+            </span>
+          </label>
+
+          <label class="flex flex-col gap-1.5">
+            <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
+              {{ t('settings.pathPrefixes') }}
+              <HintTip :text="t('settings.pathPrefixesTip')" />
+            </span>
+            <input
+              v-model="form.path_allowlist_prefixes"
+              type="text"
+              :disabled="!form.path_allowlist_enabled"
+              placeholder="/v1/,/v1beta/"
+              class="w-full px-3 py-2.5 rounded-xl bg-surface-container-high text-on-surface text-code-body font-code-body focus:outline-none focus:bg-surface-container-highest disabled:opacity-50 shadow-inset mono"
+            />
+            <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.pathPrefixesHint') }}</span>
+          </label>
+
+          <!-- 未知路径计 strike：只写内存态封禁，不写永久规则——猜一次路径远弱于
+               一个有害载荷，永久封禁仍只留给内容。 -->
+          <label class="flex items-start gap-2 cursor-pointer">
+            <input
+              v-model="form.abuse_count_unknown_path"
+              type="checkbox"
+              :disabled="!form.path_allowlist_enabled || !form.abuse_enabled"
+              class="mt-0.5 accent-primary"
+            />
+            <span class="flex flex-col gap-0.5">
+              <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface">
+                {{ t('settings.countUnknownPath') }}
+                <HintTip :text="t('settings.countUnknownPathTip')" />
+              </span>
+              <span class="text-caption-2 font-caption-2 text-outline">{{ t('settings.countUnknownPathHint') }}</span>
+            </span>
+          </label>
+        </div>
+
         <label class="flex flex-col gap-1.5">
           <span class="inline-flex items-center gap-1.5 text-caption-1 font-caption-1 text-on-surface-variant">
             {{ t('settings.blockMessage') }}

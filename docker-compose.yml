@@ -14,7 +14,11 @@ services:
     container_name: jev-safety-gateway
     restart: unless-stopped
     ports:
-      - "8080:8080"   # 过滤代理 (nginx 转发到这里)
+      # 只绑本机：公网流量必须先过 nginx（见 nginx/gateway.conf）。直接发布到
+      # 公网会让扫描器绕过 nginx 的全部规则，也会让客户端可以伪造
+      # X-Forwarded-For 自称任意 IP（既能绕过封禁，也能借封禁规则封掉别人）。
+      # 容器内仍监听所有网卡，所以 compose 里的 nginx 用服务名照常可达。
+      - "127.0.0.1:8080:8080"   # 过滤代理 (nginx 转发到这里)
       - "127.0.0.1:8081:8081"  # 管理控制台 (默认仅本机, 生产建议置于内网/加认证)
     environment:
       # 首次启动可通过环境变量做一次性初始化 (已存在的值不会被覆盖):

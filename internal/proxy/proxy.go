@@ -199,6 +199,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Path gate: reject requests for paths that are not part of the LLM API
+	// surface. Sited here, before readBody, because a scanner's request has
+	// nothing worth reading: this rejects it without buffering a body, calling
+	// JEV, or reaching the upstream.
+	//
+	// It also keeps a scan flood off the audit log's single SQLite connection
+	// (internal/config serializes on one connection), which is otherwise a
+	// self-inflicted way for port scans to slow down real traffic.
+	//
+	// The IP allowlist deliberately does NOT exempt this. Per the allowlist
+	// contract it only exempts IP-based bans; like content filtering, the path
+	// gate is a property of the request rather than of who sent it. An operator
+	// who needs an exotic path adds a prefix instead.
+	if set.Enabled && set.PathAllowlistEnabled && !isKnownPath(set, r.URL.Path) {
+		reason := "请求路径不在白名单内，未送检直接拒绝"
+		// Opt-in: a source that keeps guessing paths accrues strikes like a
+		// source that keeps sending harmful content. Note it never writes a
+		// permanent rule (unlike the harmful-content site below) — a path guess
+		// is a much weaker signal, and permanent bans stay reserved for content.
+		if set.AbuseEnabled && set.AbuseCountUnknownPath && !allowlisted {
+			if tripped, until := h.abuse.Strike(ip, start, set.AbuseWindowSec, set.AbuseMaxHarmful, set.AbuseBanSec); tripped {
+				reason += "；已触发滥用封禁至 " + until.Format("15:04:05")
+			}
+		}
+		logx.Debugf("  path %q is not allowlisted → 404", r.URL.Path)
+		h.store.AddLog(config.LogEntry{
+			TS: start, Method: r.Method, Path: r.URL.Path, Kind: "path",
+			Decision: "block", LatencyMS: time.Since(start).Milliseconds(),
+			IP: ip, Reason: reason, TraceID: traceID,
+		})
+		h.writeNotFound(w)
+		return
+	}
+
 	// Read and retain the body so we can both inspect and forward it. A body too
 	// large to inspect is streamed through untouched rather than truncated.
 	body, err := readBody(r)
@@ -284,6 +318,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.forward(w, r, set, body, row)
+}
+
+// isKnownPath reports whether path belongs to the LLM API surface this gateway
+// serves: either an endpoint the extraction table recognizes, or one matching a
+// configured prefix.
+//
+// The two are unioned because neither is complete on its own. The table tracks
+// what the gateway can extract from, so it never needs updating when new
+// endpoints are added; the operator's prefixes cover the rest of an arbitrary
+// OpenAI-compatible upstream's path space, which the gateway — a transparent
+// proxy — cannot enumerate. A miss on both is a path with no business being
+// forwarded.
+//
+// Prefix matching is case-sensitive on purpose: HTTP paths are, and an upstream
+// would treat /V1/chat/completions as a different (nonexistent) endpoint.
+func isKnownPath(set config.Settings, path string) bool {
+	if extract.KnownPath(path) {
+		return true
+	}
+	for _, prefix := range set.PathPrefixList() {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // decide runs the safety evaluation and returns the decision plus metadata.
@@ -519,6 +578,19 @@ func (h *Handler) writeTooLarge(w http.ResponseWriter) {
 	})
 }
 
+// writeNotFound answers a path-gate rejection. The body deliberately mimics the
+// error an OpenAI-compatible upstream returns for a URL it does not serve, so a
+// scanner cannot distinguish "this gateway has a filter" from "you requested the
+// wrong path". The gateway's own verdict header (X-JEV-Gateway) is omitted here
+// for the same reason — it would confirm a filter is standing in front of the
+// upstream. The request id header set at the top of ServeHTTP is kept: operators
+// need it to trace the row in the audit log.
+func (h *Handler) writeNotFound(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(`{"error":{"message":"not found","type":"invalid_request_error","code":"not_found"}}`))
+}
+
 func formatRetryAfter(until time.Time) string {
 	secs := int(time.Until(until).Seconds())
 	if secs < 1 {
@@ -748,6 +820,21 @@ func peekModel(body []byte) string {
 	return m.Model
 }
 
+// clientIP returns the originating client address, preferring the forwarding
+// headers so that requests arriving through nginx are attributed to the real
+// client rather than to nginx itself.
+//
+// CAVEAT: these headers are trusted unconditionally, so whoever can reach this
+// listener can claim any source address. That is only safe while the gateway is
+// unreachable except through a proxy that overwrites the header rather than
+// appending to it — which is why nginx/gateway.conf sets
+// `X-Forwarded-For $remote_addr` and why the proxy port must not be published
+// publicly (docker-compose binds it to 127.0.0.1). $proxy_add_x_forwarded_for
+// would be wrong here: it appends the client's own value, and this function
+// reads the FIRST element, so the client would control the result.
+//
+// The settings that act on this value — IP rules, abuse bans, and
+// AbuseCountUnknownPath — inherit that assumption.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.IndexByte(xff, ','); i >= 0 {

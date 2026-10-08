@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Settings holds the runtime configuration of the gateway. All fields are
 // editable from the admin frontend and persisted in SQLite.
@@ -78,6 +81,38 @@ type Settings struct {
 	// heuristic, and it is only lifted by deleting the rule from the IP rule pool.
 	AbuseBanPermanent bool `json:"abuse_ban_permanent"`
 
+	// --- Path gate (scan interception) ---
+
+	// PathAllowlistEnabled rejects any request whose path is not part of the
+	// known LLM API surface, without reading the body, calling JEV or reaching
+	// the upstream. It is what keeps port scanners — which guess /wp-login.php,
+	// /.env, /actuator/env and never send a body worth examining — from being
+	// proxied upstream and from writing an audit row each.
+	//
+	// Off by default, and the default matters on upgrade: load() decodes the
+	// stored blob on top of DefaultSettings(), so a field missing from the blob
+	// takes its default. Turning this on by default would silently start
+	// rejecting traffic the moment a binary with the field is deployed. An
+	// unknown path is a guess, and a legitimate client on an endpoint this
+	// gateway does not enumerate must not begin failing on an upgrade.
+	PathAllowlistEnabled bool `json:"path_allowlist_enabled"`
+
+	// PathAllowlistPrefixes is the comma-separated set of path prefixes treated
+	// as known, unioned with the built-in endpoint table (internal/extract). The
+	// table cannot enumerate every upstream's path space — the gateway is a
+	// transparent proxy to an arbitrary OpenAI-compatible upstream — so the
+	// prefixes are the part the operator owns. Normalized by PathPrefixList.
+	PathAllowlistPrefixes string `json:"path_allowlist_prefixes"`
+
+	// AbuseCountUnknownPath counts a path-gate rejection as an abuse strike, so a
+	// scanner that keeps guessing is banned after AbuseMaxHarmful hits. Off by
+	// default, and it means nothing without PathAllowlistEnabled. It never writes
+	// a permanent rule even with AbuseBanPermanent on: a path guess is a far
+	// weaker signal than a harmful payload, and permanent bans stay reserved for
+	// content. It is only as trustworthy as the client IP — see the
+	// X-Forwarded-For caveat in the proxy's clientIP.
+	AbuseCountUnknownPath bool `json:"abuse_count_unknown_path"`
+
 	// BlockMessage is returned (as JSON error body) when a request is blocked.
 	BlockMessage string `json:"block_message"`
 
@@ -134,7 +169,45 @@ func DefaultSettings() Settings {
 		RecordSnippet:      false,
 		DedupEnabled:       true,
 		DedupWindowSec:     60,
+
+		// The gate itself is off; the prefixes are still seeded so that turning it
+		// on in the console is immediately usable rather than an empty field.
+		PathAllowlistEnabled:  false,
+		PathAllowlistPrefixes: DefaultPathAllowlistPrefixes,
+		AbuseCountUnknownPath: false,
 	}
+}
+
+// DefaultPathAllowlistPrefixes is the prefix set a fresh install starts with:
+// the OpenAI-compatible surface and its beta alias. Between them they cover the
+// request shapes this gateway is built for — /v1/chat/completions, Anthropic's
+// /v1/messages, Gemini's /v1beta/models/{model}:generateContent, and the
+// multipart audio/image endpoints — so the seeded value is a usable allowlist
+// for the common deployment, not a placeholder.
+const DefaultPathAllowlistPrefixes = "/v1/,/v1beta/"
+
+// PathPrefixList parses PathAllowlistPrefixes into normalized prefixes: trimmed,
+// empties dropped, each guaranteed a leading "/" so a bare "v1" cannot match a
+// path like "/wv1/x". A field with nothing usable in it falls back to the
+// default rather than to an empty list — an empty list would reject every
+// request that the endpoint table does not recognize, turning a cleared text
+// box into a silent denial of service rather than "no prefixes configured".
+func (s Settings) PathPrefixList() []string {
+	var out []string
+	for _, p := range strings.Split(s.PathAllowlistPrefixes, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return strings.Split(DefaultPathAllowlistPrefixes, ",")
+	}
+	return out
 }
 
 // JEVKey is one TypeSafe API key used in round-robin rotation.
@@ -185,7 +258,8 @@ type LogEntry struct {
 
 	// InspectMS is the pre-forward phase of this row: body read, extraction and
 	// (except for skip rows) the JEV evaluation. Nil only on rows that never got
-	// that far — a request rejected by an IP rule or an abuse ban.
+	// that far — a request rejected by an IP rule, an abuse ban, or the path
+	// gate.
 	InspectMS *int64 `json:"inspect_ms,omitempty"`
 
 	// UpstreamMS is the forward phase, measured from the request to the upstream

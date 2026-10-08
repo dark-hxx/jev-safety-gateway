@@ -248,6 +248,15 @@ func (s *Store) UpdateSettings(set Settings) error {
 	if set.DedupEnabled && set.DedupWindowSec <= 0 {
 		set.DedupWindowSec = 60
 	}
+	// Canonicalize the path prefixes through the same parser the proxy matches
+	// with, so what the console reads back is what the gate enforces. This is
+	// load-bearing, not cosmetic: a bare "v1" would be stored verbatim and then
+	// never match a path (which always starts with "/"), silently rejecting the
+	// very traffic the operator meant to allow. PathPrefixList fixes the leading
+	// slash and falls back to the default when nothing usable is left.
+	if set.PathAllowlistEnabled {
+		set.PathAllowlistPrefixes = strings.Join(set.PathPrefixList(), ",")
+	}
 	return s.saveSettings(set)
 }
 

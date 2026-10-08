@@ -100,12 +100,15 @@ flowchart LR
 mkdir -p ./data ./geoip && sudo chown -R 10001:10001 ./data   # Linux 必需，见下
 
 docker run -d --name jev-safety-gateway --restart unless-stopped \
-  -p 8080:8080 -p 127.0.0.1:8081:8081 \
+  -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 \
   -v "$PWD/data:/data" -v "$PWD/geoip:/geoip:ro" \
   ghcr.io/dark-hxx/jev-safety-gateway:latest
 ```
 
-- 过滤代理监听 `:8080`（nginx 转发到这里），管理控制台 `127.0.0.1:8081`（**只绑本机**）
+> 两个端口都只发布到 `127.0.0.1`：代理口由本机 nginx 反代（见 `nginx/gateway.conf`），控制台走 SSH 隧道。
+> 直接把 `8080` 发布到公网会让扫描器绕过 nginx、并让客户端能伪造来源 IP——理由见 [docs/deployment.md](docs/deployment.md#公网加固防端口扫描)。
+
+- 过滤代理监听 `:8080`（nginx 转发到这里；compose 只把它发布到 `127.0.0.1`，公网必须先过 nginx），管理控制台 `127.0.0.1:8081`（**只绑本机**）
 - `./data/` 是数据库目录（`.db` / `-wal` / `-shm` 三件套都在里面，**备份就是打包它，里面任何一个文件都不要单独删**）
 - `./geoip/` 放自备的 MaxMind 库，放进去即生效；空目录则该维度关闭
 - 容器以非 root 的 uid 10001 运行，而绑定挂载用的是宿主目录的属主——Linux 上不改 `./data` 属主就起不来，日志报 `open store: … permission denied` 并反复重启（Docker Desktop 一般不用改）
@@ -160,7 +163,7 @@ curl -fsSL https://raw.githubusercontent.com/dark-hxx/jev-safety-gateway/master/
 
 ```bash
 # ARM64 把 amd64 换成 arm64；VER 换成 Releases 页最新版本号
-VER=1.0.0
+VER=1.0.1
 curl -fL -o jev.tar.gz \
   https://github.com/dark-hxx/jev-safety-gateway/releases/download/v${VER}/jev-safety-gateway-${VER}-linux-amd64.tar.gz
 tar xzf jev.tar.gz && cd jev-safety-gateway-${VER}-linux-amd64
@@ -205,6 +208,10 @@ sudo ./install.sh
 | `abuse_window_sec` | 统计窗口（秒） | `60` |
 | `abuse_max_harmful` | 窗口内有害次数达到该值即封禁 | `5` |
 | `abuse_ban_sec` | 封禁时长（秒） | `300` |
+| `abuse_ban_permanent` | 自动封禁同时写入永久封禁规则（重启后仍生效，只能到 IP 规则里手工解除） | `false` |
+| `path_allowlist_enabled` | 路径白名单：非已知接口路径直接 404，不转发上游、不调 JEV（防端口扫描，见[公网加固](docs/deployment.md#公网加固防端口扫描)） | `false` |
+| `path_allowlist_prefixes` | 白名单前缀（逗号分隔），与内置接口表取并集 | `/v1/,/v1beta/` |
+| `abuse_count_unknown_path` | 未知路径的拒绝计入滥用次数，达到阈值即封禁该 IP（需同时开启路径白名单与滥用防护） | `false` |
 
 判定逻辑：网关向 JEV 发送一个 `noul`（是/否）问题，返回 0–1 的分数（越接近 1 = 越安全）。当 `block_if_below=true` 且 `分数 < 阈值` 时判定有害，返回 **403**：
 
@@ -368,6 +375,9 @@ Dockerfile, docker-compose.yml
   远程访问请用 SSH 隧道（`ssh -L 8081:127.0.0.1:8081 <user>@<host>`），**不要**改绑 `0.0.0.0`——控制台除自身登录外没有别的保护。
 - **公开演示实例**（见[界面展示](#-界面展示)）：口令随 README 公开，任何人登录后都能改它的配置、看它的审计记录。只当预览界面用，别往里填真实密钥，也别把真实流量打进去。
 - 网关本身不校验客户端 apikey；对客户端的鉴权仍由上游（new-api 等）负责。网关只做内容安全过滤。
+- **公网部署请先做端口收敛**：代理口（`8080`）只能经 nginx 访问。Docker 已绑 `127.0.0.1`，裸机需自己加防火墙。
+  网关无条件信任 `X-Forwarded-For` 的第一段，直连代理口既能绕过全部 nginx 规则，也能伪造来源 IP 去绕过封禁或封掉别人。
+  nginx 示例里内置了扫描特征拦截（`return 444`），网关侧还有可选的路径白名单——见 [docs/deployment.md](docs/deployment.md#公网加固防端口扫描)。
 - JEV 密钥、管理员口令哈希保存在 SQLite（Docker 下是部署目录的 `./data/`，绑到容器 `/data`），请妥善保管。
 - **`GET /api/version` 是唯一免鉴权的 `/api/` 路由**：登录页需要在拿到 token 之前显示版本号与守护进程地址。
   它只返回构建标识（版本、短提交号、构建时间、Go 版本）与实际绑定的监听地址，不含任何审计数据；

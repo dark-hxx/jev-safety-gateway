@@ -36,6 +36,24 @@ export interface Settings {
    * 由启发式判定做出，所以默认关闭，且只能到「IP 风险分析」页删除规则解封。
    */
   abuse_ban_permanent: boolean
+  /**
+   * 是否开启路径门禁：请求路径不属于已知 LLM 接口面时直接拒绝，不读 body、
+   * 不送检、不到上游。专治端口扫描器猜路径（/wp-login.php、/.env 之类）。
+   * 默认关闭——升级时 load() 把存储的 blob 叠在默认值上，新增字段会直接取到
+   * 默认值，所以默认开启等于发布即静默改变现网行为。要在控制台显式打开。
+   */
+  path_allowlist_enabled: boolean
+  /**
+   * 逗号分隔的路径前缀白名单，与后端内置的接口表取并集。
+   * 例：`/v1/,/v1beta/`。留空时后端回退为默认值（不是「全部拒绝」）。
+   */
+  path_allowlist_prefixes: string
+  /**
+   * 是否把「路径被门禁拒绝」计入滥用封禁次数；默认关闭，且仅在
+   * `path_allowlist_enabled` 开启时有意义。它只会写内存态封禁，不写永久规则
+   * ——猜一次路径远弱于一个有害载荷，永久封禁仍只留给内容。
+   */
+  abuse_count_unknown_path: boolean
 }
 
 /**

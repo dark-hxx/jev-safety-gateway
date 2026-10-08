@@ -238,12 +238,41 @@ func Clamp(s string, max int) string {
 
 // lookup returns the descriptor for a lowercased path, or the generic fallback.
 func lookup(p string) endpoint {
+	ep, _ := matchEndpoint(p)
+	return ep
+}
+
+// matchEndpoint returns the descriptor for a lowercased path, and whether the
+// table recognized the path at all. A false match means the generic fallback
+// applies — the two callers below want different things from that case: lookup
+// still extracts (nothing goes unchecked), KnownPath does not.
+func matchEndpoint(p string) (endpoint, bool) {
 	for _, ep := range endpoints {
 		if ep.match(p) {
-			return ep
+			return ep, true
 		}
 	}
-	return genericEndpoint
+	return genericEndpoint, false
+}
+
+// KnownPath reports whether path names an endpoint in the dispatch table, i.e.
+// part of the LLM API surface this gateway knows how to extract from rather than
+// a URL a scanner guessed. It is the path gate's notion of "known" — see the
+// PathAllowlist settings and internal/proxy.
+//
+// The table's matchers are deliberately loose (suffix/contains), so /foo/models
+// reports known too. That is acceptable here precisely because a match only
+// means "not rejected by the path gate": such a request still goes through
+// extraction and the JEV evaluation like any other. A loose match can therefore
+// only restore the pre-gate behavior, never skip a content check.
+//
+// This set is NOT the whole allowlist. The gateway proxies to an arbitrary
+// OpenAI-compatible upstream whose full path space the table cannot enumerate,
+// so the operator's configured prefixes (config.Settings.PathPrefixList) are
+// unioned with it by the caller.
+func KnownPath(path string) bool {
+	_, ok := matchEndpoint(strings.ToLower(path))
+	return ok
 }
 
 func suffix(s string) func(string) bool {
